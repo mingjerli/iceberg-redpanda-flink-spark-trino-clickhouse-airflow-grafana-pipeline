@@ -1,0 +1,35 @@
+# =============================================================================
+# Iceberg REST Catalog Configuration
+# =============================================================================
+# Configuration for the Iceberg REST catalog service.
+# This catalog stores metadata in SQLite (or can be configured for PostgreSQL)
+# and uses S3 (MinIO) for data storage.
+# =============================================================================
+
+# Catalog configuration
+catalog:
+  # Catalog name
+  name: ${ICEBERG_CATALOG_NAME:-demo}
+
+  # Catalog type (in-memory for demo, use jdbc for production)
+  type: rest
+
+  # Warehouse location in S3
+  warehouse: ${CATALOG_WAREHOUSE:-s3://warehouse/}
+
+# S3/MinIO configuration
+s3:
+  endpoint: ${MINIO_ENDPOINT:-http://minio:9000}
+  access-key-id: ${MINIO_ROOT_USER:-admin}
+  secret-access-key: ${MINIO_ROOT_PASSWORD:-admin123456}
+  path-style-access: true
+  region: us-east-1
+
+# Server configuration
+server:
+  port: ${ICEBERG_REST_PORT:-8181}
+  host: 0.0.0.0
+
+# Logging
+logging:
+  level: INFO

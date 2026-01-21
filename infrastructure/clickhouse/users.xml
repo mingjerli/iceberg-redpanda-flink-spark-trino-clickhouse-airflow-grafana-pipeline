@@ -1,0 +1,61 @@
+<?xml version="1.0"?>
+<!--
+=============================================================================
+ClickHouse Users Configuration
+=============================================================================
+User and profile configuration for ClickHouse.
+=============================================================================
+-->
+<clickhouse>
+    <!-- Profiles define query settings -->
+    <profiles>
+        <default>
+            <max_memory_usage>10000000000</max_memory_usage>
+            <use_uncompressed_cache>0</use_uncompressed_cache>
+            <load_balancing>random</load_balancing>
+            <max_partitions_per_insert_block>100</max_partitions_per_insert_block>
+
+            <!-- Allow reading from S3 -->
+            <s3_max_connections>1000</s3_max_connections>
+            <s3_min_upload_part_size>33554432</s3_min_upload_part_size>
+
+            <!-- Iceberg-specific settings -->
+            <allow_experimental_object_type>1</allow_experimental_object_type>
+        </default>
+
+        <readonly>
+            <readonly>1</readonly>
+        </readonly>
+    </profiles>
+
+    <!-- Users -->
+    <users>
+        <!-- Default user (for local development) -->
+        <default>
+            <password from_env="CLICKHOUSE_PASSWORD"></password>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <access_management>1</access_management>
+            <named_collection_control>1</named_collection_control>
+            <show_named_collections>1</show_named_collections>
+            <show_named_collections_secrets>1</show_named_collections_secrets>
+        </default>
+    </users>
+
+    <!-- Quotas -->
+    <quotas>
+        <default>
+            <interval>
+                <duration>3600</duration>
+                <queries>0</queries>
+                <errors>0</errors>
+                <result_rows>0</result_rows>
+                <read_rows>0</read_rows>
+                <execution_time>0</execution_time>
+            </interval>
+        </default>
+    </quotas>
+</clickhouse>

@@ -1,0 +1,9 @@
+# Data Generation Dependencies
+faker>=28.0.0
+python-dateutil>=2.8.2
+orjson>=3.9.0  # Fast JSON serialization
+click>=8.1.0   # CLI interface
+tqdm>=4.66.0   # Progress bars
+
+# Optional: for Kafka/Redpanda output
+# confluent-kafka>=2.3.0

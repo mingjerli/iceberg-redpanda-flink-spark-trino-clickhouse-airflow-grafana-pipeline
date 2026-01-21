@@ -1,0 +1,81 @@
+<?xml version="1.0"?>
+<!--
+=============================================================================
+ClickHouse Server Configuration
+=============================================================================
+Custom configuration for ClickHouse with Iceberg support.
+This extends the default configuration with S3/MinIO access.
+=============================================================================
+-->
+<clickhouse>
+    <!-- Logging configuration -->
+    <logger>
+        <level>information</level>
+        <log>/var/log/clickhouse-server/clickhouse-server.log</log>
+        <errorlog>/var/log/clickhouse-server/clickhouse-server.err.log</errorlog>
+        <size>1000M</size>
+        <count>10</count>
+    </logger>
+
+    <!-- HTTP interface -->
+    <http_port>8123</http_port>
+    <listen_host>0.0.0.0</listen_host>
+
+    <!-- Native protocol -->
+    <tcp_port>9000</tcp_port>
+
+    <!-- MySQL protocol (optional) -->
+    <mysql_port>9004</mysql_port>
+
+    <!-- PostgreSQL protocol (optional) -->
+    <postgresql_port>9005</postgresql_port>
+
+    <!-- Data paths -->
+    <path>/var/lib/clickhouse/</path>
+    <tmp_path>/var/lib/clickhouse/tmp/</tmp_path>
+    <user_files_path>/var/lib/clickhouse/user_files/</user_files_path>
+
+    <!-- Memory limits -->
+    <max_server_memory_usage_to_ram_ratio>0.8</max_server_memory_usage_to_ram_ratio>
+    <max_concurrent_queries>100</max_concurrent_queries>
+
+    <!-- S3/MinIO configuration for Iceberg tables -->
+    <s3>
+        <minio>
+            <endpoint>http://minio:9000/</endpoint>
+            <access_key_id replace="1" from_env="MINIO_ROOT_USER"/>
+            <secret_access_key replace="1" from_env="MINIO_ROOT_PASSWORD"/>
+            <use_environment_credentials>false</use_environment_credentials>
+            <region>us-east-1</region>
+        </minio>
+    </s3>
+
+    <!-- Named collections for easier Iceberg access -->
+    <named_collections>
+        <iceberg_warehouse>
+            <url>http://minio:9000/warehouse/</url>
+            <access_key_id replace="1" from_env="MINIO_ROOT_USER"/>
+            <secret_access_key replace="1" from_env="MINIO_ROOT_PASSWORD"/>
+        </iceberg_warehouse>
+    </named_collections>
+
+    <!-- Query profiling -->
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <partition_by>toYYYYMM(event_date)</partition_by>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </query_log>
+
+    <!-- Default profile -->
+    <default_profile>default</default_profile>
+
+    <!-- Default database -->
+    <default_database>default</default_database>
+
+    <!-- Timezone -->
+    <timezone>UTC</timezone>
+
+    <!-- Format settings -->
+    <format_schema_path>/var/lib/clickhouse/format_schemas/</format_schema_path>
+</clickhouse>

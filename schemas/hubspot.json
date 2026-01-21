@@ -1,0 +1,196 @@
+{
+  "source": "hubspot",
+  "api_version": "v3",
+  "api_type": "REST CRM API",
+  "documentation": "https://developers.hubspot.com/docs/api/crm/contacts",
+  "note": "HubSpot CRM API uses REST. Webhook payloads include subscription details and changed properties.",
+  "tables": {
+    "contacts": {
+      "description": "Contact records in HubSpot CRM (webhook: contact.creation, contact.propertyChange)",
+      "webhook_event": "contact.creation",
+      "columns": {
+        "id": {"type": "STRING", "description": "HubSpot object ID (hs_object_id)", "pii": false, "example": "12345"},
+        "properties": {"type": "JSON", "description": "All contact properties as key-value pairs", "pii": true},
+        "email": {"type": "STRING", "description": "Primary email address (unique identifier)", "pii": true},
+        "firstname": {"type": "STRING", "description": "Contact first name", "pii": true, "nullable": true},
+        "lastname": {"type": "STRING", "description": "Contact last name", "pii": true, "nullable": true},
+        "phone": {"type": "STRING", "description": "Primary phone number", "pii": true, "nullable": true},
+        "mobilephone": {"type": "STRING", "description": "Mobile phone number", "pii": true, "nullable": true},
+        "company": {"type": "STRING", "description": "Company name (text, not association)", "pii": false, "nullable": true},
+        "jobtitle": {"type": "STRING", "description": "Job title", "pii": false, "nullable": true},
+        "lifecyclestage": {"type": "STRING", "description": "Lifecycle stage", "pii": false, "enum": ["subscriber", "lead", "marketingqualifiedlead", "salesqualifiedlead", "opportunity", "customer", "evangelist", "other"]},
+        "hs_lead_status": {"type": "STRING", "description": "Lead status", "pii": false, "nullable": true},
+        "address": {"type": "STRING", "description": "Street address", "pii": true, "nullable": true},
+        "city": {"type": "STRING", "description": "City", "pii": false, "nullable": true},
+        "state": {"type": "STRING", "description": "State/region", "pii": false, "nullable": true},
+        "zip": {"type": "STRING", "description": "Postal/ZIP code", "pii": true, "nullable": true},
+        "country": {"type": "STRING", "description": "Country", "pii": false, "nullable": true},
+        "website": {"type": "STRING", "description": "Website URL", "pii": false, "nullable": true},
+        "hs_analytics_source": {"type": "STRING", "description": "Original traffic source", "pii": false, "nullable": true, "enum": ["ORGANIC_SEARCH", "PAID_SEARCH", "EMAIL_MARKETING", "SOCIAL_MEDIA", "REFERRALS", "OTHER_CAMPAIGNS", "DIRECT_TRAFFIC", "OFFLINE", "PAID_SOCIAL"]},
+        "hs_analytics_first_url": {"type": "STRING", "description": "First page seen", "pii": false, "nullable": true},
+        "hs_analytics_num_page_views": {"type": "INT64", "description": "Total page views", "pii": false, "nullable": true},
+        "hs_analytics_num_visits": {"type": "INT64", "description": "Number of sessions", "pii": false, "nullable": true},
+        "hs_email_optout": {"type": "BOOLEAN", "description": "Opted out of all email", "pii": false},
+        "createdate": {"type": "TIMESTAMP", "description": "Record creation timestamp", "pii": false},
+        "lastmodifieddate": {"type": "TIMESTAMP", "description": "Last modified timestamp", "pii": false},
+        "hs_object_id": {"type": "STRING", "description": "HubSpot object ID", "pii": false},
+        "associatedcompanyid": {"type": "STRING", "description": "Associated company ID", "pii": false, "nullable": true},
+        "_webhook_received_at": {"type": "TIMESTAMP", "description": "When webhook was received", "pii": false},
+        "_webhook_subscription_type": {"type": "STRING", "description": "Webhook subscription type", "pii": false}
+      }
+    },
+    "companies": {
+      "description": "Company records in HubSpot CRM (webhook: company.creation, company.propertyChange)",
+      "webhook_event": "company.creation",
+      "columns": {
+        "id": {"type": "STRING", "description": "HubSpot object ID", "pii": false},
+        "properties": {"type": "JSON", "description": "All company properties", "pii": false},
+        "name": {"type": "STRING", "description": "Company name", "pii": false},
+        "domain": {"type": "STRING", "description": "Company website domain (unique identifier)", "pii": false, "nullable": true},
+        "description": {"type": "STRING", "description": "Company description", "pii": false, "nullable": true},
+        "industry": {"type": "STRING", "description": "Industry category", "pii": false, "nullable": true},
+        "type": {"type": "STRING", "description": "Company type", "pii": false, "nullable": true, "enum": ["PROSPECT", "PARTNER", "RESELLER", "VENDOR", "OTHER"]},
+        "phone": {"type": "STRING", "description": "Company phone number", "pii": false, "nullable": true},
+        "address": {"type": "STRING", "description": "Street address", "pii": false, "nullable": true},
+        "address2": {"type": "STRING", "description": "Address line 2", "pii": false, "nullable": true},
+        "city": {"type": "STRING", "description": "City", "pii": false, "nullable": true},
+        "state": {"type": "STRING", "description": "State/region", "pii": false, "nullable": true},
+        "zip": {"type": "STRING", "description": "Postal code", "pii": false, "nullable": true},
+        "country": {"type": "STRING", "description": "Country", "pii": false, "nullable": true},
+        "timezone": {"type": "STRING", "description": "Company timezone", "pii": false, "nullable": true},
+        "website": {"type": "STRING", "description": "Company website URL", "pii": false, "nullable": true},
+        "linkedin_company_page": {"type": "STRING", "description": "LinkedIn company page URL", "pii": false, "nullable": true},
+        "facebook_company_page": {"type": "STRING", "description": "Facebook page URL", "pii": false, "nullable": true},
+        "twitterhandle": {"type": "STRING", "description": "Twitter handle", "pii": false, "nullable": true},
+        "numberofemployees": {"type": "INT64", "description": "Number of employees", "pii": false, "nullable": true},
+        "annualrevenue": {"type": "DECIMAL", "description": "Annual revenue", "pii": false, "nullable": true},
+        "lifecyclestage": {"type": "STRING", "description": "Lifecycle stage", "pii": false, "nullable": true},
+        "hs_lead_status": {"type": "STRING", "description": "Lead status", "pii": false, "nullable": true},
+        "hubspot_owner_id": {"type": "STRING", "description": "Owner user ID", "pii": false, "nullable": true},
+        "notes_last_contacted": {"type": "TIMESTAMP", "description": "Last contact date", "pii": false, "nullable": true},
+        "notes_last_updated": {"type": "TIMESTAMP", "description": "Last note update", "pii": false, "nullable": true},
+        "notes_next_activity_date": {"type": "TIMESTAMP", "description": "Next scheduled activity", "pii": false, "nullable": true},
+        "num_associated_contacts": {"type": "INT64", "description": "Number of associated contacts", "pii": false},
+        "num_associated_deals": {"type": "INT64", "description": "Number of associated deals", "pii": false},
+        "recent_deal_amount": {"type": "DECIMAL", "description": "Most recent deal amount", "pii": false, "nullable": true},
+        "recent_deal_close_date": {"type": "TIMESTAMP", "description": "Most recent deal close date", "pii": false, "nullable": true},
+        "total_revenue": {"type": "DECIMAL", "description": "Total revenue from all deals", "pii": false, "nullable": true},
+        "createdate": {"type": "TIMESTAMP", "description": "Record creation timestamp", "pii": false},
+        "lastmodifieddate": {"type": "TIMESTAMP", "description": "Last modified timestamp", "pii": false},
+        "hs_object_id": {"type": "STRING", "description": "HubSpot object ID", "pii": false},
+        "_webhook_received_at": {"type": "TIMESTAMP", "description": "When webhook was received", "pii": false},
+        "_webhook_subscription_type": {"type": "STRING", "description": "Webhook subscription type", "pii": false}
+      }
+    },
+    "deals": {
+      "description": "Deal/opportunity records in HubSpot CRM (webhook: deal.creation, deal.propertyChange)",
+      "webhook_event": "deal.creation",
+      "columns": {
+        "id": {"type": "STRING", "description": "HubSpot object ID", "pii": false},
+        "properties": {"type": "JSON", "description": "All deal properties", "pii": false},
+        "dealname": {"type": "STRING", "description": "Deal name", "pii": false},
+        "dealstage": {"type": "STRING", "description": "Current deal stage ID", "pii": false},
+        "pipeline": {"type": "STRING", "description": "Pipeline ID", "pii": false},
+        "amount": {"type": "DECIMAL", "description": "Deal amount", "pii": false, "nullable": true},
+        "closedate": {"type": "TIMESTAMP", "description": "Expected or actual close date", "pii": false, "nullable": true},
+        "dealtype": {"type": "STRING", "description": "Deal type", "pii": false, "nullable": true, "enum": ["newbusiness", "existingbusiness"]},
+        "description": {"type": "STRING", "description": "Deal description", "pii": false, "nullable": true},
+        "hs_priority": {"type": "STRING", "description": "Deal priority", "pii": false, "nullable": true, "enum": ["low", "medium", "high"]},
+        "hs_deal_stage_probability": {"type": "DECIMAL", "description": "Stage probability (0-1)", "pii": false, "nullable": true},
+        "hs_forecast_amount": {"type": "DECIMAL", "description": "Weighted amount (amount * probability)", "pii": false, "nullable": true},
+        "hs_forecast_probability": {"type": "DECIMAL", "description": "Forecast probability", "pii": false, "nullable": true},
+        "hs_is_closed": {"type": "BOOLEAN", "description": "Whether deal is closed", "pii": false},
+        "hs_is_closed_won": {"type": "BOOLEAN", "description": "Whether deal is closed-won", "pii": false},
+        "hubspot_owner_id": {"type": "STRING", "description": "Deal owner user ID", "pii": false, "nullable": true},
+        "hs_created_by_user_id": {"type": "STRING", "description": "User who created the deal", "pii": false, "nullable": true},
+        "notes_last_contacted": {"type": "TIMESTAMP", "description": "Last contact date", "pii": false, "nullable": true},
+        "notes_last_updated": {"type": "TIMESTAMP", "description": "Last note update", "pii": false, "nullable": true},
+        "notes_next_activity_date": {"type": "TIMESTAMP", "description": "Next scheduled activity", "pii": false, "nullable": true},
+        "num_associated_contacts": {"type": "INT64", "description": "Number of associated contacts", "pii": false},
+        "num_contacted_notes": {"type": "INT64", "description": "Number of contact notes", "pii": false, "nullable": true},
+        "num_notes": {"type": "INT64", "description": "Total notes", "pii": false, "nullable": true},
+        "hs_analytics_source": {"type": "STRING", "description": "Original source of first contact", "pii": false, "nullable": true},
+        "hs_analytics_source_data_1": {"type": "STRING", "description": "Additional source data", "pii": false, "nullable": true},
+        "hs_analytics_source_data_2": {"type": "STRING", "description": "Additional source data", "pii": false, "nullable": true},
+        "hs_lastmodifieddate": {"type": "TIMESTAMP", "description": "Last modified timestamp", "pii": false},
+        "hs_createdate": {"type": "TIMESTAMP", "description": "Creation timestamp", "pii": false},
+        "createdate": {"type": "TIMESTAMP", "description": "Record creation timestamp", "pii": false},
+        "lastmodifieddate": {"type": "TIMESTAMP", "description": "Last modified timestamp", "pii": false},
+        "hs_object_id": {"type": "STRING", "description": "HubSpot object ID", "pii": false},
+        "_webhook_received_at": {"type": "TIMESTAMP", "description": "When webhook was received", "pii": false},
+        "_webhook_subscription_type": {"type": "STRING", "description": "Webhook subscription type", "pii": false}
+      }
+    },
+    "engagements": {
+      "description": "Engagement activities (calls, emails, meetings, notes, tasks)",
+      "note": "Engagements are activities associated with contacts, companies, and deals",
+      "columns": {
+        "id": {"type": "STRING", "description": "Engagement ID", "pii": false},
+        "type": {"type": "STRING", "description": "Engagement type", "pii": false, "enum": ["NOTE", "EMAIL", "TASK", "MEETING", "CALL"]},
+        "properties": {"type": "JSON", "description": "Engagement-specific properties", "pii": true},
+        "hs_timestamp": {"type": "TIMESTAMP", "description": "Engagement timestamp", "pii": false},
+        "hs_created_by": {"type": "STRING", "description": "User who created", "pii": false, "nullable": true},
+        "hubspot_owner_id": {"type": "STRING", "description": "Owner user ID", "pii": false, "nullable": true},
+        "hs_body_preview": {"type": "STRING", "description": "Preview of engagement body", "pii": true, "nullable": true},
+        "hs_body_preview_html": {"type": "STRING", "description": "HTML preview", "pii": true, "nullable": true},
+        "hs_body_preview_is_truncated": {"type": "BOOLEAN", "description": "Whether preview is truncated", "pii": false},
+        "associations": {"type": "JSON", "description": "Associated object IDs", "pii": false},
+        "createdate": {"type": "TIMESTAMP", "description": "Creation timestamp", "pii": false},
+        "lastmodifieddate": {"type": "TIMESTAMP", "description": "Last modified timestamp", "pii": false},
+        "hs_object_id": {"type": "STRING", "description": "HubSpot object ID", "pii": false},
+        "_webhook_received_at": {"type": "TIMESTAMP", "description": "When webhook was received", "pii": false},
+        "_webhook_subscription_type": {"type": "STRING", "description": "Webhook subscription type", "pii": false}
+      }
+    }
+  },
+  "associations": {
+    "description": "HubSpot uses associations to link objects together",
+    "types": {
+      "contact_to_company": {
+        "from": "contacts",
+        "to": "companies",
+        "label": "Primary company association"
+      },
+      "contact_to_deal": {
+        "from": "contacts",
+        "to": "deals",
+        "label": "Contact associated with deal"
+      },
+      "company_to_deal": {
+        "from": "companies",
+        "to": "deals",
+        "label": "Company associated with deal"
+      }
+    }
+  },
+  "webhook_payload": {
+    "description": "HubSpot webhook payload structure",
+    "fields": {
+      "subscriptionId": "INT64 (webhook subscription ID)",
+      "portalId": "INT64 (HubSpot account ID)",
+      "appId": "INT64 (app ID)",
+      "occurredAt": "TIMESTAMP (when event occurred)",
+      "subscriptionType": "STRING (contact.creation, deal.propertyChange, etc.)",
+      "attemptNumber": "INT64 (retry attempt)",
+      "objectId": "INT64 (object ID)",
+      "propertyName": "STRING (for propertyChange events)",
+      "propertyValue": "STRING (new value)",
+      "changeSource": "STRING (CRM, INTEGRATION, API, etc.)",
+      "eventId": "INT64 (unique event ID)"
+    },
+    "note": "Unlike Shopify/Stripe, HubSpot webhooks send minimal data. You must fetch full object via API using objectId."
+  },
+  "pipelines": {
+    "deals": {
+      "default_stages": [
+        {"id": "appointmentscheduled", "label": "Appointment Scheduled", "probability": 0.2},
+        {"id": "qualifiedtobuy", "label": "Qualified to Buy", "probability": 0.4},
+        {"id": "presentationscheduled", "label": "Presentation Scheduled", "probability": 0.6},
+        {"id": "decisionmakerboughtin", "label": "Decision Maker Bought-In", "probability": 0.8},
+        {"id": "contractsent", "label": "Contract Sent", "probability": 0.9},
+        {"id": "closedwon", "label": "Closed Won", "probability": 1.0},
+        {"id": "closedlost", "label": "Closed Lost", "probability": 0.0}
+      ]
+    }
+  }
+}

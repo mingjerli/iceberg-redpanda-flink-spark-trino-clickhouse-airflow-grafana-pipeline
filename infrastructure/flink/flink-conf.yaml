@@ -1,0 +1,74 @@
+# =============================================================================
+# Apache Flink Configuration
+# =============================================================================
+# Configuration for Flink JobManager and TaskManager.
+# This file is mounted into the Flink containers.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Job Manager Configuration
+# -----------------------------------------------------------------------------
+jobmanager.rpc.address: flink-jobmanager
+jobmanager.rpc.port: 6123
+jobmanager.bind-host: 0.0.0.0
+jobmanager.memory.process.size: 1600m
+
+# -----------------------------------------------------------------------------
+# Task Manager Configuration
+# -----------------------------------------------------------------------------
+taskmanager.bind-host: 0.0.0.0
+taskmanager.host: flink-taskmanager
+taskmanager.memory.process.size: 2048m
+taskmanager.numberOfTaskSlots: 4
+
+# -----------------------------------------------------------------------------
+# Parallelism Configuration
+# -----------------------------------------------------------------------------
+parallelism.default: 2
+
+# -----------------------------------------------------------------------------
+# Checkpointing Configuration
+# -----------------------------------------------------------------------------
+execution.checkpointing.interval: 60000
+execution.checkpointing.mode: EXACTLY_ONCE
+execution.checkpointing.timeout: 600000
+execution.checkpointing.min-pause: 500
+execution.checkpointing.max-concurrent-checkpoints: 1
+state.backend.type: hashmap
+state.checkpoints.dir: s3://warehouse/checkpoints/flink
+state.savepoints.dir: s3://warehouse/savepoints/flink
+
+# -----------------------------------------------------------------------------
+# REST API Configuration
+# -----------------------------------------------------------------------------
+rest.address: 0.0.0.0
+rest.bind-address: 0.0.0.0
+rest.port: 8081
+
+# -----------------------------------------------------------------------------
+# Web UI Configuration
+# -----------------------------------------------------------------------------
+web.submit.enable: true
+web.cancel.enable: true
+web.upload.dir: /opt/flink/uploads
+
+# -----------------------------------------------------------------------------
+# High Availability (disabled for demo)
+# -----------------------------------------------------------------------------
+# high-availability.type: zookeeper
+# high-availability.storageDir: s3://warehouse/ha/flink
+# high-availability.zookeeper.quorum: zookeeper:2181
+
+# -----------------------------------------------------------------------------
+# S3/MinIO Configuration
+# -----------------------------------------------------------------------------
+s3.endpoint: http://minio:9000
+s3.path.style.access: true
+s3.access-key: admin
+s3.secret-key: admin123456
+
+# -----------------------------------------------------------------------------
+# Logging
+# -----------------------------------------------------------------------------
+env.log.dir: /opt/flink/log
+env.log.max: 5
