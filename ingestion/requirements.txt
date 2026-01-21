@@ -1,0 +1,22 @@
+# =============================================================================
+# Ingestion Service Dependencies
+# =============================================================================
+
+# Web framework
+fastapi>=0.109.0,<1.0.0
+uvicorn[standard]>=0.27.0,<1.0.0
+
+# Kafka/Redpanda producer
+aiokafka>=0.10.0,<1.0.0
+
+# Configuration
+pydantic>=2.0.0,<3.0.0
+pydantic-settings>=2.0.0,<3.0.0
+
+# Utilities
+python-multipart>=0.0.6,<1.0.0  # For form data
+
+# Optional: For testing
+httpx>=0.26.0,<1.0.0
+pytest>=8.0.0,<9.0.0
+pytest-asyncio>=0.23.0,<1.0.0

@@ -166,6 +166,37 @@ services:
       - iceberg-network
 
   # ===========================================================================
+  # Ingestion API - Webhook Receiver
+  # ===========================================================================
+  ingestion-api:
+    build:
+      context: ../ingestion
+      dockerfile: Dockerfile
+    container_name: iceberg-ingestion-api
+    hostname: ingestion-api
+    ports:
+      - "${EXTERNAL_INGESTION_API_PORT:-8090}:8000"
+    environment:
+      INGESTION_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      INGESTION_SERVICE_NAME: ingestion-api
+      INGESTION_LOG_LEVEL: ${INGESTION_LOG_LEVEL:-INFO}
+      INGESTION_SKIP_SIGNATURE_VALIDATION: ${INGESTION_SKIP_SIGNATURE_VALIDATION:-true}
+      INGESTION_SHOPIFY_WEBHOOK_SECRET: ${SHOPIFY_WEBHOOK_SECRET:-}
+      INGESTION_STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      INGESTION_HUBSPOT_CLIENT_SECRET: ${HUBSPOT_CLIENT_SECRET:-}
+    depends_on:
+      redpanda-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    networks:
+      - iceberg-network
+
+  # ===========================================================================
   # Apache Flink - Streaming ETL
   # ===========================================================================
   flink-jobmanager:
@@ -232,17 +263,16 @@ services:
       - "${EXTERNAL_SPARK_UI_PORT:-8084}:8080"
       - "7077:7077"
     environment:
-      SPARK_MODE: master
       SPARK_MASTER_HOST: spark-master
       SPARK_MASTER_PORT: 7077
       SPARK_MASTER_WEBUI_PORT: 8080
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123456}
       AWS_REGION: us-east-1
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     volumes:
-      - ../jobs/spark:/opt/bitnami/spark/jobs:ro
-      - ../sql:/opt/bitnami/spark/sql:ro
-      - spark-events:/opt/bitnami/spark/spark-events
+      - ../jobs/spark:/opt/spark/jobs:ro
+      - ../sql:/opt/spark/sql:ro
     depends_on:
       minio-init:
         condition: service_completed_successfully
@@ -264,17 +294,15 @@ services:
     container_name: iceberg-spark-worker
     hostname: spark-worker
     environment:
-      SPARK_MODE: worker
-      SPARK_MASTER_URL: spark://spark-master:7077
       SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-4}
       SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123456}
       AWS_REGION: us-east-1
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
     volumes:
-      - ../jobs/spark:/opt/bitnami/spark/jobs:ro
-      - ../sql:/opt/bitnami/spark/sql:ro
-      - spark-events:/opt/bitnami/spark/spark-events
+      - ../jobs/spark:/opt/spark/jobs:ro
+      - ../sql:/opt/spark/sql:ro
     depends_on:
       spark-master:
         condition: service_healthy

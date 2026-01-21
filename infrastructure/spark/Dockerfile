@@ -4,17 +4,14 @@
 # Custom Spark image with pre-installed libraries for:
 # - Apache Iceberg (table format)
 # - AWS S3 (MinIO compatible)
-# - Delta Lake (optional, for comparison)
 # =============================================================================
 
-ARG SPARK_VERSION=3.5.1
+ARG SPARK_VERSION=3.5.3
 ARG ICEBERG_VERSION=1.5.0
-ARG HADOOP_VERSION=3
 
-FROM bitnami/spark:${SPARK_VERSION}
+FROM apache/spark:${SPARK_VERSION}
 
 # Build arguments
-ARG SPARK_VERSION
 ARG ICEBERG_VERSION
 
 # Labels
@@ -31,7 +28,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Spark jars directory
-ENV SPARK_HOME=/opt/bitnami/spark
+ENV SPARK_HOME=/opt/spark
 ENV SPARK_JARS_DIR=${SPARK_HOME}/jars
 
 # Download Iceberg Spark runtime
@@ -54,17 +51,13 @@ RUN wget -P ${SPARK_JARS_DIR}/ \
 RUN wget -P ${SPARK_JARS_DIR}/ \
     "https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws/${ICEBERG_VERSION}/iceberg-aws-${ICEBERG_VERSION}.jar"
 
-# Set proper permissions
-RUN chown -R 1001:1001 ${SPARK_JARS_DIR}
-
 # Copy custom configuration
 COPY spark-defaults.conf ${SPARK_HOME}/conf/spark-defaults.conf
-RUN chown 1001:1001 ${SPARK_HOME}/conf/spark-defaults.conf
-
-# Switch back to non-root user
-USER 1001
 
 # Environment variables
 ENV AWS_ACCESS_KEY_ID=admin
 ENV AWS_SECRET_ACCESS_KEY=admin123456
 ENV AWS_REGION=us-east-1
+
+# Switch back to spark user
+USER spark
