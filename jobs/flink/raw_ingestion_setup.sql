@@ -27,7 +27,7 @@ USE CATALOG iceberg_catalog;
 -- -----------------------------------------------------------------------------
 -- Create Raw Schema/Database
 -- -----------------------------------------------------------------------------
-CREATE DATABASE IF NOT EXISTS raw
+CREATE DATABASE IF NOT EXISTS `raw`
 COMMENT 'Raw layer - append-only webhook events';
 
 -- Create Metadata Schema/Database

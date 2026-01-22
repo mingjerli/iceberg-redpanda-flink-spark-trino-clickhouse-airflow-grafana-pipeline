@@ -1,23 +1,37 @@
 -- =============================================================================
--- Flink SQL: Shopify Orders Raw Ingestion
+-- Flink SQL: Shopify Orders Full Pipeline
 -- =============================================================================
--- Streams Shopify order events from Redpanda to Iceberg raw table.
--- This is an append-only streaming job that runs continuously.
---
--- Prerequisites:
---   - Run raw_ingestion_setup.sql first
---   - Redpanda topic 'shopify.orders' must exist
---   - Iceberg raw.shopify_orders table must exist
+-- Complete pipeline: setup catalog + streaming ingestion
+-- Combines raw_ingestion_setup.sql + shopify_orders_ingestion.sql
 -- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- Create Iceberg Catalog Connection
+-- -----------------------------------------------------------------------------
+CREATE CATALOG iceberg_catalog WITH (
+    'type' = 'iceberg',
+    'catalog-type' = 'rest',
+    'uri' = 'http://iceberg-rest:8181',
+    'warehouse' = 's3a://warehouse/',
+    'io-impl' = 'org.apache.iceberg.aws.s3.S3FileIO',
+    's3.endpoint' = 'http://minio:9000',
+    's3.path-style-access' = 'true',
+    's3.access-key-id' = 'admin',
+    's3.secret-access-key' = 'admin123456'
+);
 
 -- Use the Iceberg catalog
 USE CATALOG iceberg_catalog;
+
+-- Create Raw Database
+CREATE DATABASE IF NOT EXISTS `raw`
+COMMENT 'Raw layer - append-only webhook events';
+
 USE `raw`;
 
 -- -----------------------------------------------------------------------------
 -- Create Kafka Source Table
 -- -----------------------------------------------------------------------------
--- Temporary table that reads from Redpanda
 CREATE TEMPORARY TABLE shopify_orders_source (
     `id`                              BIGINT,
     `admin_graphql_api_id`            STRING,
@@ -103,9 +117,8 @@ CREATE TEMPORARY TABLE shopify_orders_source (
 );
 
 -- -----------------------------------------------------------------------------
--- Create Iceberg Sink Table (if not exists)
+-- Create Iceberg Sink Table
 -- -----------------------------------------------------------------------------
--- Note: This matches the DDL in sql/00_raw/shopify/orders.sql
 CREATE TABLE IF NOT EXISTS shopify_orders (
     `id`                              BIGINT,
     `admin_graphql_api_id`            STRING,
@@ -176,8 +189,7 @@ CREATE TABLE IF NOT EXISTS shopify_orders (
     `_webhook_received_at`            TIMESTAMP(3),
     `_webhook_topic`                  STRING,
     `_loaded_at`                      TIMESTAMP(3)
-) PARTITIONED BY (months(`created_at`))
-WITH (
+) WITH (
     'format-version' = '2',
     'write.upsert.enabled' = 'false'
 );
@@ -194,7 +206,6 @@ SELECT
     `name`,
     `token`,
     `confirmation_number`,
-    -- Extract customer_id from nested JSON
     CAST(JSON_VALUE(customer, '$.id') AS BIGINT) as customer_id,
     `email`,
     `phone`,

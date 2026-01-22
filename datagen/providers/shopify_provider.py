@@ -95,9 +95,11 @@ class ShopifyProvider:
             shared: Optional shared customer data for cross-source consistency
         """
         customer_id = self._next_id("customer")
-        created_at = shared["created_at"] if shared else self.fake.date_time_between(
-            start_date="-2y", end_date="-1d"
-        )
+        created_at = shared.get("created_at") if shared else None
+        if not created_at:
+            created_at = self.fake.date_time_between(
+                start_date="-2y", end_date="-1d"
+            )
 
         email = shared["email"] if shared else self.fake.email()
         first_name = shared["first_name"] if shared else self.fake.first_name()
