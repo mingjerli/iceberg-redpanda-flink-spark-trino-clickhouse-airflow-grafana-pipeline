@@ -35,7 +35,7 @@ CREATE TEMPORARY TABLE shopify_orders_file_sink (
 ) PARTITIONED BY (`year`, `month`, `day`)
 WITH (
     'connector' = 'filesystem',
-    'path' = 's3://raw-events/shopify/orders/',
+    'path' = 's3a://raw-events/shopify/orders/',
     'format' = 'raw',
     'sink.rolling-policy.file-size' = '128MB',
     'sink.rolling-policy.rollover-interval' = '15 min',
@@ -78,7 +78,7 @@ CREATE TEMPORARY TABLE shopify_customers_file_sink (
 ) PARTITIONED BY (`year`, `month`, `day`)
 WITH (
     'connector' = 'filesystem',
-    'path' = 's3://raw-events/shopify/customers/',
+    'path' = 's3a://raw-events/shopify/customers/',
     'format' = 'raw',
     'sink.rolling-policy.file-size' = '128MB',
     'sink.rolling-policy.rollover-interval' = '15 min',
@@ -120,7 +120,7 @@ CREATE TEMPORARY TABLE stripe_customers_file_sink (
 ) PARTITIONED BY (`year`, `month`, `day`)
 WITH (
     'connector' = 'filesystem',
-    'path' = 's3://raw-events/stripe/customers/',
+    'path' = 's3a://raw-events/stripe/customers/',
     'format' = 'raw',
     'sink.rolling-policy.file-size' = '128MB',
     'sink.rolling-policy.rollover-interval' = '15 min',
@@ -162,7 +162,7 @@ CREATE TEMPORARY TABLE stripe_charges_file_sink (
 ) PARTITIONED BY (`year`, `month`, `day`)
 WITH (
     'connector' = 'filesystem',
-    'path' = 's3://raw-events/stripe/charges/',
+    'path' = 's3a://raw-events/stripe/charges/',
     'format' = 'raw',
     'sink.rolling-policy.file-size' = '128MB',
     'sink.rolling-policy.rollover-interval' = '15 min',
@@ -204,7 +204,7 @@ CREATE TEMPORARY TABLE hubspot_contacts_file_sink (
 ) PARTITIONED BY (`year`, `month`, `day`)
 WITH (
     'connector' = 'filesystem',
-    'path' = 's3://raw-events/hubspot/contacts/',
+    'path' = 's3a://raw-events/hubspot/contacts/',
     'format' = 'raw',
     'sink.rolling-policy.file-size' = '128MB',
     'sink.rolling-policy.rollover-interval' = '15 min',
