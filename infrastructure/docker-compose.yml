@@ -9,12 +9,15 @@
 # - Spark: Batch ETL engine
 # - ClickHouse: OLAP database
 # - Trino: Ad-hoc SQL queries
+# - Airflow: Workflow orchestration
 #
 # Usage:
 #   cp .env.example .env  # Configure environment
 #   docker-compose up -d  # Start all services
 #   docker-compose ps     # Check status
 #   docker-compose down   # Stop all services
+#
+# Airflow UI: http://localhost:8086 (admin/admin123)
 # =============================================================================
 
 services:
@@ -65,6 +68,9 @@ services:
   # ===========================================================================
   # Iceberg REST Catalog
   # ===========================================================================
+  # Uses PostgreSQL JDBC backend instead of SQLite for better concurrency.
+  # SQLite only allows one writer at a time, causing lock contention with
+  # concurrent Spark/Flink jobs. PostgreSQL handles concurrent access properly.
   iceberg-rest:
     image: tabulario/iceberg-rest:1.5.0
     container_name: iceberg-rest
@@ -72,16 +78,25 @@ services:
     ports:
       - "${EXTERNAL_ICEBERG_REST_PORT:-8181}:8181"
     environment:
+      # S3/MinIO configuration
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123456}
       AWS_REGION: us-east-1
-      CATALOG_WAREHOUSE: s3://${MINIO_WAREHOUSE_BUCKET:-warehouse}/
+      CATALOG_WAREHOUSE: s3a://${MINIO_WAREHOUSE_BUCKET:-warehouse}/
       CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
       CATALOG_S3_ENDPOINT: http://minio:9000
       CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      # JDBC backend configuration (PostgreSQL instead of SQLite)
+      # This enables concurrent catalog access from multiple Spark/Flink jobs
+      CATALOG_CATALOG__IMPL: org.apache.iceberg.jdbc.JdbcCatalog
+      CATALOG_URI: jdbc:postgresql://airflow-postgres:5432/iceberg_catalog
+      CATALOG_JDBC_USER: ${AIRFLOW_POSTGRES_USER:-airflow}
+      CATALOG_JDBC_PASSWORD: ${AIRFLOW_POSTGRES_PASSWORD:-airflow123}
     depends_on:
       minio-init:
         condition: service_completed_successfully
+      airflow-postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/8181'"]
       interval: 10s
@@ -374,6 +389,150 @@ services:
     networks:
       - iceberg-network
 
+  # ===========================================================================
+  # Apache Airflow - Workflow Orchestration
+  # ===========================================================================
+  # PostgreSQL for Airflow metadata AND Iceberg REST catalog
+  # Using a single PostgreSQL instance with multiple databases for simplicity
+  airflow-postgres:
+    image: postgres:15-alpine
+    container_name: iceberg-airflow-postgres
+    hostname: airflow-postgres
+    environment:
+      POSTGRES_USER: ${AIRFLOW_POSTGRES_USER:-airflow}
+      POSTGRES_PASSWORD: ${AIRFLOW_POSTGRES_PASSWORD:-airflow123}
+      POSTGRES_DB: ${AIRFLOW_POSTGRES_DB:-airflow}
+    volumes:
+      - airflow-postgres-data:/var/lib/postgresql/data
+      # Init script to create iceberg_catalog database
+      - ./postgres/init-iceberg-db.sh:/docker-entrypoint-initdb.d/init-iceberg-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - iceberg-network
+
+  # Airflow initialization (DB setup + admin user)
+  airflow-init:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
+    container_name: iceberg-airflow-init
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_POSTGRES_USER:-airflow}:${AIRFLOW_POSTGRES_PASSWORD:-airflow123}@airflow-postgres:5432/${AIRFLOW_POSTGRES_DB:-airflow}
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-81HqDtbqAywKSOumSha3BhWNOdQ26slT6K0YaZeZyPs=}
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER:-admin}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin123}
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username $${_AIRFLOW_WWW_USER_USERNAME} \
+          --password $${_AIRFLOW_WWW_USER_PASSWORD} \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com || true
+        echo "Airflow initialization complete"
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+    networks:
+      - iceberg-network
+
+  # Airflow Webserver
+  airflow-webserver:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
+    container_name: iceberg-airflow-webserver
+    hostname: airflow-webserver
+    ports:
+      - "${EXTERNAL_AIRFLOW_PORT:-8086}:8080"
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_POSTGRES_USER:-airflow}:${AIRFLOW_POSTGRES_PASSWORD:-airflow123}@airflow-postgres:5432/${AIRFLOW_POSTGRES_DB:-airflow}
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-81HqDtbqAywKSOumSha3BhWNOdQ26slT6K0YaZeZyPs=}
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      AIRFLOW__WEBSERVER__RBAC: "true"
+      # Spark configuration for BashOperator
+      SPARK_MASTER: spark://spark-master:7077
+      # MinIO/S3 credentials for Spark jobs
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123456}
+      AWS_REGION: us-east-1
+    command: webserver
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags:ro
+      - ../airflow/logs:/opt/airflow/logs
+      - ../airflow/plugins:/opt/airflow/plugins:ro
+      - ../jobs/spark:/opt/spark/jobs:ro
+      - ../sql:/opt/airflow/sql:ro  # SQL files for clgraph lineage
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker socket for docker exec
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      spark-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - iceberg-network
+
+  # Airflow Scheduler
+  airflow-scheduler:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
+    container_name: iceberg-airflow-scheduler
+    hostname: airflow-scheduler
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_POSTGRES_USER:-airflow}:${AIRFLOW_POSTGRES_PASSWORD:-airflow123}@airflow-postgres:5432/${AIRFLOW_POSTGRES_DB:-airflow}
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-81HqDtbqAywKSOumSha3BhWNOdQ26slT6K0YaZeZyPs=}
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: 30
+      # Spark configuration for BashOperator
+      SPARK_MASTER: spark://spark-master:7077
+      # MinIO/S3 credentials for Spark jobs
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123456}
+      AWS_REGION: us-east-1
+    command: scheduler
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags:ro
+      - ../airflow/logs:/opt/airflow/logs
+      - ../airflow/plugins:/opt/airflow/plugins:ro
+      - ../jobs/spark:/opt/spark/jobs:ro
+      - ../sql:/opt/airflow/sql:ro  # SQL files for clgraph lineage
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker socket for docker exec
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      spark-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - iceberg-network
+
 # =============================================================================
 # Volumes
 # =============================================================================
@@ -390,6 +549,8 @@ volumes:
     name: iceberg-demo-clickhouse-data
   trino-data:
     name: iceberg-demo-trino-data
+  airflow-postgres-data:
+    name: iceberg-demo-airflow-postgres-data
 
 # =============================================================================
 # Networks
