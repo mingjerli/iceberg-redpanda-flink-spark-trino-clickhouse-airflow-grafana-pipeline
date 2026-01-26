@@ -154,6 +154,8 @@ docker exec iceberg-airflow-scheduler airflow dags trigger clgraph_iceberg_pipel
 | Service | URL | Credentials |
 |---------|-----|-------------|
 | Airflow | http://localhost:8086 | admin / admin123 |
+| Grafana | http://localhost:3000 | admin / admin123 |
+| Prometheus | http://localhost:9090 | - |
 | Spark Master | http://localhost:8084 | - |
 | Flink Dashboard | http://localhost:8083 | - |
 | MinIO Console | http://localhost:9001 | admin / admin123456 |

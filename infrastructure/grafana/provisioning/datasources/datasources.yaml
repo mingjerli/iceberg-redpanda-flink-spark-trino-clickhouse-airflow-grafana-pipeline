@@ -1,0 +1,32 @@
+# =============================================================================
+# Grafana Datasource Provisioning
+# =============================================================================
+# Automatically configures Prometheus as a datasource on Grafana startup.
+# =============================================================================
+
+apiVersion: 1
+
+datasources:
+  # Prometheus datasource
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: "15s"
+      httpMethod: POST
+
+  # ClickHouse datasource (optional - requires grafana-clickhouse-datasource plugin)
+  # - name: ClickHouse
+  #   type: grafana-clickhouse-datasource
+  #   uid: clickhouse
+  #   access: proxy
+  #   url: http://clickhouse:8123
+  #   editable: false
+  #   jsonData:
+  #     defaultDatabase: default
+  #   secureJsonData:
+  #     password: clickhouse123
