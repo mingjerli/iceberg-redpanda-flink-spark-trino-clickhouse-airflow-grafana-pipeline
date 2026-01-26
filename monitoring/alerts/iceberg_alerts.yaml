@@ -1,0 +1,220 @@
+# =============================================================================
+# Iceberg Data Pipeline Alert Rules
+# =============================================================================
+# Prometheus alerting rules for the Iceberg incremental demo.
+# Deploy to Prometheus server or AlertManager.
+#
+# Usage:
+#   1. Copy to Prometheus rules directory
+#   2. Update prometheus.yml to include rule_files
+#   3. Reload Prometheus configuration
+# =============================================================================
+
+groups:
+  # ===========================================================================
+  # Pipeline Health Alerts
+  # ===========================================================================
+  - name: pipeline_health
+    interval: 1m
+    rules:
+      # Alert when Airflow DAG fails
+      - alert: PipelineFailure
+        expr: increase(airflow_dag_run_failed_total{dag_id="clgraph_iceberg_pipeline"}[1h]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: data-engineering
+        annotations:
+          summary: "Iceberg pipeline failed"
+          description: "The clgraph_iceberg_pipeline DAG has failed {{ $value }} times in the last hour."
+          runbook_url: "https://docs/runbook#pipeline-failure"
+
+      # Alert when pipeline is running too long
+      - alert: PipelineDurationHigh
+        expr: airflow_dag_run_duration_seconds{dag_id="clgraph_iceberg_pipeline", state="running"} > 600
+        for: 5m
+        labels:
+          severity: warning
+          team: data-engineering
+        annotations:
+          summary: "Pipeline running longer than expected"
+          description: "Pipeline has been running for {{ $value | humanizeDuration }}. Expected < 10 minutes."
+          runbook_url: "https://docs/runbook#slow-pipeline"
+
+      # Alert when pipeline hasn't run recently
+      - alert: PipelineStale
+        expr: time() - airflow_dag_last_success_timestamp{dag_id="clgraph_iceberg_pipeline"} > 21600
+        for: 5m
+        labels:
+          severity: warning
+          team: data-engineering
+        annotations:
+          summary: "Pipeline hasn't run successfully"
+          description: "No successful pipeline run in the last 6 hours."
+          runbook_url: "https://docs/runbook#stale-pipeline"
+
+  # ===========================================================================
+  # Data Quality Alerts
+  # ===========================================================================
+  - name: data_quality
+    interval: 5m
+    rules:
+      # Alert when raw layer stops receiving data
+      - alert: RawDataIngestionStopped
+        expr: increase(iceberg_table_row_count{layer="raw"}[1h]) == 0
+        for: 30m
+        labels:
+          severity: warning
+          team: data-engineering
+        annotations:
+          summary: "No new raw data ingested"
+          description: "Table {{ $labels.table }} has not received new data in 30 minutes."
+          runbook_url: "https://docs/runbook#ingestion-stopped"
+
+      # Alert when staging data is stale
+      - alert: StagingDataStale
+        expr: |
+          (iceberg_table_row_count{layer="raw"} - iceberg_table_row_count{layer="staging"})
+          / iceberg_table_row_count{layer="raw"} > 0.1
+        for: 15m
+        labels:
+          severity: warning
+          team: data-engineering
+        annotations:
+          summary: "Staging layer behind raw layer"
+          description: "Staging table {{ $labels.table }} is more than 10% behind raw layer."
+          runbook_url: "https://docs/runbook#staging-lag"
+
+      # Alert on entity resolution coverage drop
+      - alert: EntityCoverageLow
+        expr: entity_resolution_coverage_percent < 90
+        for: 10m
+        labels:
+          severity: warning
+          team: data-engineering
+        annotations:
+          summary: "Entity resolution coverage dropped"
+          description: "Entity coverage for {{ $labels.source }} is {{ $value }}%. Expected >= 90%."
+          runbook_url: "https://docs/runbook#entity-coverage"
+
+      # Alert on duplicate entity mappings
+      - alert: DuplicateEntityMappings
+        expr: entity_resolution_duplicate_mappings > 0
+        for: 5m
+        labels:
+          severity: critical
+          team: data-engineering
+        annotations:
+          summary: "Duplicate entity mappings detected"
+          description: "Found {{ $value }} duplicate entity mappings. This indicates a data quality issue."
+          runbook_url: "https://docs/runbook#duplicate-entities"
+
+  # ===========================================================================
+  # Infrastructure Alerts
+  # ===========================================================================
+  - name: infrastructure
+    interval: 30s
+    rules:
+      # Alert when Iceberg REST catalog is down
+      - alert: IcebergCatalogDown
+        expr: up{job="iceberg-rest"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Iceberg REST catalog is down"
+          description: "The Iceberg REST catalog service is unreachable. All data operations will fail."
+          runbook_url: "https://docs/runbook#catalog-down"
+
+      # Alert when MinIO is down
+      - alert: MinIODown
+        expr: up{job="minio"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "MinIO storage is down"
+          description: "MinIO object storage is unreachable. All data operations will fail."
+          runbook_url: "https://docs/runbook#minio-down"
+
+      # Alert when Redpanda/Kafka is down
+      - alert: RedpandaDown
+        expr: up{job="redpanda"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Redpanda is down"
+          description: "Redpanda message queue is unreachable. Webhook ingestion will fail."
+          runbook_url: "https://docs/runbook#redpanda-down"
+
+      # Alert when Kafka consumer lag is high
+      - alert: KafkaConsumerLagHigh
+        expr: redpanda_kafka_consumer_group_lag > 10000
+        for: 10m
+        labels:
+          severity: warning
+          team: data-engineering
+        annotations:
+          summary: "Kafka consumer lag is high"
+          description: "Consumer group for {{ $labels.topic }} has {{ $value }} messages lag."
+          runbook_url: "https://docs/runbook#consumer-lag"
+
+      # Alert when MinIO storage is almost full
+      - alert: MinIOStorageAlmostFull
+        expr: |
+          minio_bucket_usage_total_bytes{bucket="warehouse"}
+          / minio_bucket_quota_bytes{bucket="warehouse"} > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "MinIO storage almost full"
+          description: "Warehouse bucket is {{ $value | humanizePercentage }} full."
+          runbook_url: "https://docs/runbook#storage-full"
+
+  # ===========================================================================
+  # Maintenance Alerts
+  # ===========================================================================
+  - name: maintenance
+    interval: 5m
+    rules:
+      # Alert when table has too many small files
+      - alert: TableNeedsCompaction
+        expr: iceberg_table_file_count > 100
+        for: 1h
+        labels:
+          severity: info
+          team: data-engineering
+        annotations:
+          summary: "Table needs compaction"
+          description: "Table {{ $labels.table }} has {{ $value }} files. Consider running compaction."
+          runbook_url: "https://docs/runbook#compaction"
+
+      # Alert when too many snapshots
+      - alert: TooManySnapshots
+        expr: iceberg_table_snapshot_count > 50
+        for: 1h
+        labels:
+          severity: info
+          team: data-engineering
+        annotations:
+          summary: "Table has many snapshots"
+          description: "Table {{ $labels.table }} has {{ $value }} snapshots. Consider running expire_snapshots."
+          runbook_url: "https://docs/runbook#snapshot-expiration"
+
+      # Alert when compaction job fails
+      - alert: CompactionJobFailed
+        expr: increase(maintenance_job_failed_total{job="compact_tables"}[24h]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          team: data-engineering
+        annotations:
+          summary: "Compaction job failed"
+          description: "The table compaction maintenance job has failed."
+          runbook_url: "https://docs/runbook#compaction-failure"
