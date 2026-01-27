@@ -5,7 +5,7 @@
 # commands on the Spark container via docker exec.
 # =============================================================================
 
-FROM apache/airflow:2.8.1-python3.11
+FROM apache/airflow:3.1.6-python3.12
 
 USER root
 
@@ -33,5 +33,5 @@ RUN usermod -aG root airflow 2>/dev/null || true
 USER airflow
 
 # Install clgraph for DAG generation from SQL lineage
-# Using pip as the airflow user
-RUN pip install --no-cache-dir clgraph
+# Install Celery provider for CeleryExecutor
+RUN pip install --no-cache-dir clgraph apache-airflow-providers-celery redis

@@ -5,19 +5,32 @@
 # - MinIO: S3-compatible object storage
 # - Iceberg REST Catalog: Metadata catalog for Iceberg tables
 # - Redpanda: Kafka-compatible message queue
+# - Ingestion API: Webhook receiver for Shopify/Stripe/HubSpot
+# - Datagen: Mock data generator (optional, use --profile datagen)
 # - Flink: Streaming ETL engine
 # - Spark: Batch ETL engine
 # - ClickHouse: OLAP database
 # - Trino: Ad-hoc SQL queries
-# - Airflow: Workflow orchestration
+# - Redis: Message broker for Airflow CeleryExecutor
+# - Airflow: Workflow orchestration (with CeleryExecutor)
+# - Prometheus: Metrics collection
+# - Grafana: Metrics visualization
 #
 # Usage:
-#   cp .env.example .env  # Configure environment
-#   docker-compose up -d  # Start all services
-#   docker-compose ps     # Check status
-#   docker-compose down   # Stop all services
+#   docker compose up -d                    # Start core services
+#   docker compose --profile datagen up -d  # Start with mock data generator
+#   docker compose ps                       # Check status
+#   docker compose down                     # Stop all services
 #
-# Airflow UI: http://localhost:8086 (admin/admin123)
+# Web UIs:
+#   Airflow:    http://localhost:8086 (admin/admin123)
+#   Spark:      http://localhost:8084
+#   Flink:      http://localhost:8083
+#   MinIO:      http://localhost:9001 (admin/admin123)
+#   Redpanda:   http://localhost:8080
+#   Grafana:    http://localhost:3000 (admin/admin123)
+#   ClickHouse: http://localhost:8123 (default/admin123)
+#   Trino:      http://localhost:8085
 # =============================================================================
 
 services:
@@ -33,7 +46,9 @@ services:
       - "${EXTERNAL_MINIO_CONSOLE_PORT:-9001}:9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-admin123456}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-admin123}
+      # Enable Prometheus metrics without authentication
+      MINIO_PROMETHEUS_AUTH_TYPE: public
     command: server /data --console-address ":9001"
     volumes:
       - minio-data:/data
@@ -56,7 +71,7 @@ services:
     environment:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-admin123456}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-admin123}
       MINIO_WAREHOUSE_BUCKET: ${MINIO_WAREHOUSE_BUCKET:-warehouse}
       MINIO_RAW_EVENTS_BUCKET: ${MINIO_RAW_EVENTS_BUCKET:-raw-events}
     volumes:
@@ -72,7 +87,9 @@ services:
   # SQLite only allows one writer at a time, causing lock contention with
   # concurrent Spark/Flink jobs. PostgreSQL handles concurrent access properly.
   iceberg-rest:
-    image: tabulario/iceberg-rest:1.5.0
+    build:
+      context: ./iceberg-rest
+      dockerfile: Dockerfile
     container_name: iceberg-rest
     hostname: iceberg-rest
     ports:
@@ -80,7 +97,7 @@ services:
     environment:
       # S3/MinIO configuration
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123456}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123}
       AWS_REGION: us-east-1
       CATALOG_WAREHOUSE: s3a://${MINIO_WAREHOUSE_BUCKET:-warehouse}/
       CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
@@ -212,6 +229,35 @@ services:
       - iceberg-network
 
   # ===========================================================================
+  # Mock Data Generator - Webhook Simulator
+  # ===========================================================================
+  # Generates mock data and sends it to the ingestion API as webhook events.
+  # Simulates traffic from Shopify, Stripe, and HubSpot.
+  datagen:
+    build:
+      context: ../datagen
+      dockerfile: Dockerfile
+    container_name: iceberg-datagen
+    hostname: datagen
+    environment:
+      INGESTION_API_URL: http://ingestion-api:8000
+      DATAGEN_SOURCE: ${DATAGEN_SOURCE:-all}
+      DATAGEN_COUNT: ${DATAGEN_COUNT:-100}
+      DATAGEN_CONTINUOUS: ${DATAGEN_CONTINUOUS:-true}
+      DATAGEN_INTERVAL: ${DATAGEN_INTERVAL:-2.0}
+      DATAGEN_SEED: ${DATAGEN_SEED:-}
+    depends_on:
+      ingestion-api:
+        condition: service_healthy
+    # No restart by default - starts, generates data, then stops
+    # Set DATAGEN_CONTINUOUS=true to keep running
+    restart: "no"
+    profiles:
+      - datagen
+    networks:
+      - iceberg-network
+
+  # ===========================================================================
   # Apache Flink - Streaming ETL
   # ===========================================================================
   flink-jobmanager:
@@ -224,7 +270,7 @@ services:
       - "${EXTERNAL_FLINK_UI_PORT:-8083}:8081"
     environment:
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123456}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123}
       AWS_REGION: us-east-1
     command: jobmanager
     volumes:
@@ -253,7 +299,7 @@ services:
     hostname: flink-taskmanager
     environment:
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123456}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123}
       AWS_REGION: us-east-1
     command: taskmanager
     volumes:
@@ -282,7 +328,7 @@ services:
       SPARK_MASTER_PORT: 7077
       SPARK_MASTER_WEBUI_PORT: 8080
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123456}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123}
       AWS_REGION: us-east-1
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     volumes:
@@ -312,7 +358,7 @@ services:
       SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-4}
       SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123456}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123}
       AWS_REGION: us-east-1
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
     volumes:
@@ -335,9 +381,9 @@ services:
       - "${EXTERNAL_CLICKHOUSE_HTTP_PORT:-8123}:8123"
       - "${EXTERNAL_CLICKHOUSE_NATIVE_PORT:-19000}:9000"
     environment:
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse123}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-admin123}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-admin123456}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-admin123}
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ./clickhouse/config.xml:/etc/clickhouse-server/config.d/custom.xml:ro
@@ -356,6 +402,30 @@ services:
     networks:
       - iceberg-network
 
+  # ClickHouse analytics schema initialization
+  clickhouse-init:
+    image: clickhouse/clickhouse-server:24.3
+    container_name: iceberg-clickhouse-init
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    environment:
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-admin123}
+    volumes:
+      - ./clickhouse/init-analytics.sql:/init-analytics.sql:ro
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "Waiting for ClickHouse to be ready..."
+        sleep 5
+        echo "Initializing ClickHouse analytics schema..."
+        clickhouse-client --host clickhouse --password $${CLICKHOUSE_PASSWORD} --multiquery < /init-analytics.sql
+        echo "ClickHouse analytics schema initialized"
+    networks:
+      - iceberg-network
+
   # ===========================================================================
   # Trino - Ad-hoc SQL Queries
   # ===========================================================================
@@ -367,7 +437,7 @@ services:
       - "${EXTERNAL_TRINO_PORT:-8085}:8080"
     environment:
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123456}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123}
       AWS_REGION: us-east-1
     volumes:
       - ./trino/config.properties:/etc/trino/config.properties:ro
@@ -392,6 +462,21 @@ services:
   # ===========================================================================
   # Apache Airflow - Workflow Orchestration
   # ===========================================================================
+  # Redis for Celery message broker
+  redis:
+    image: redis:7-alpine
+    container_name: iceberg-redis
+    hostname: redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - iceberg-network
+
   # PostgreSQL for Airflow metadata AND Iceberg REST catalog
   # Using a single PostgreSQL instance with multiple databases for simplicity
   airflow-postgres:
@@ -422,11 +507,12 @@ services:
       dockerfile: Dockerfile
     container_name: iceberg-airflow-init
     environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_POSTGRES_USER:-airflow}:${AIRFLOW_POSTGRES_PASSWORD:-airflow123}@airflow-postgres:5432/${AIRFLOW_POSTGRES_DB:-airflow}
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-81HqDtbqAywKSOumSha3BhWNOdQ26slT6K0YaZeZyPs=}
-      _AIRFLOW_DB_MIGRATE: "true"
-      _AIRFLOW_WWW_USER_CREATE: "true"
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${AIRFLOW_POSTGRES_USER:-airflow}:${AIRFLOW_POSTGRES_PASSWORD:-airflow123}@airflow-postgres:5432/${AIRFLOW_POSTGRES_DB:-airflow}
       _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER:-admin}
       _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin123}
     entrypoint: /bin/bash
@@ -434,6 +520,7 @@ services:
       - -c
       - |
         airflow db migrate
+        # Create admin user using FAB auth manager (Airflow 3.x)
         airflow users create \
           --username $${_AIRFLOW_WWW_USER_USERNAME} \
           --password $${_AIRFLOW_WWW_USER_PASSWORD} \
@@ -445,10 +532,12 @@ services:
     depends_on:
       airflow-postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - iceberg-network
 
-  # Airflow Webserver
+  # Airflow API Server (replaces webserver in Airflow 3.x)
   airflow-webserver:
     build:
       context: ./airflow
@@ -458,19 +547,29 @@ services:
     ports:
       - "${EXTERNAL_AIRFLOW_PORT:-8086}:8080"
     environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_POSTGRES_USER:-airflow}:${AIRFLOW_POSTGRES_PASSWORD:-airflow123}@airflow-postgres:5432/${AIRFLOW_POSTGRES_DB:-airflow}
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-81HqDtbqAywKSOumSha3BhWNOdQ26slT6K0YaZeZyPs=}
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
-      AIRFLOW__WEBSERVER__RBAC: "true"
+      AIRFLOW__API__AUTH_BACKENDS: airflow.providers.fab.auth_manager.api.auth.backend.basic_auth
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${AIRFLOW_POSTGRES_USER:-airflow}:${AIRFLOW_POSTGRES_PASSWORD:-airflow123}@airflow-postgres:5432/${AIRFLOW_POSTGRES_DB:-airflow}
+      # JWT secret for Task SDK (Airflow 3.x) - must be same across all services
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-AirflowJWTSecretKey2026!}
+      # StatsD metrics for Prometheus
+      AIRFLOW__METRICS__STATSD_ON: "true"
+      AIRFLOW__METRICS__STATSD_HOST: statsd-exporter
+      AIRFLOW__METRICS__STATSD_PORT: 9125
+      AIRFLOW__METRICS__STATSD_PREFIX: airflow
       # Spark configuration for BashOperator
       SPARK_MASTER: spark://spark-master:7077
       # MinIO/S3 credentials for Spark jobs
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123456}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123}
       AWS_REGION: us-east-1
-    command: webserver
+    command: api-server --apps all
     volumes:
       - ../airflow/dags:/opt/airflow/dags:ro
       - ../airflow/logs:/opt/airflow/logs
@@ -484,7 +583,7 @@ services:
       spark-master:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v2/monitor/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -500,16 +599,28 @@ services:
     container_name: iceberg-airflow-scheduler
     hostname: airflow-scheduler
     environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_POSTGRES_USER:-airflow}:${AIRFLOW_POSTGRES_PASSWORD:-airflow123}@airflow-postgres:5432/${AIRFLOW_POSTGRES_DB:-airflow}
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-81HqDtbqAywKSOumSha3BhWNOdQ26slT6K0YaZeZyPs=}
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: 30
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${AIRFLOW_POSTGRES_USER:-airflow}:${AIRFLOW_POSTGRES_PASSWORD:-airflow123}@airflow-postgres:5432/${AIRFLOW_POSTGRES_DB:-airflow}
+      # Execution API URL for Task SDK (Airflow 3.x)
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-webserver:8080/execution
+      # JWT secret for Task SDK (Airflow 3.x) - must be same across all services
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-AirflowJWTSecretKey2026!}
+      # StatsD metrics for Prometheus
+      AIRFLOW__METRICS__STATSD_ON: "true"
+      AIRFLOW__METRICS__STATSD_HOST: statsd-exporter
+      AIRFLOW__METRICS__STATSD_PORT: 9125
+      AIRFLOW__METRICS__STATSD_PREFIX: airflow
       # Spark configuration for BashOperator
       SPARK_MASTER: spark://spark-master:7077
       # MinIO/S3 credentials for Spark jobs
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123456}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123}
       AWS_REGION: us-east-1
     command: scheduler
     volumes:
@@ -522,10 +633,68 @@ services:
     depends_on:
       airflow-init:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
       spark-master:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --local"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - iceberg-network
+
+  # Airflow Celery Worker
+  airflow-worker:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
+    container_name: iceberg-airflow-worker
+    hostname: airflow-worker
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_POSTGRES_USER:-airflow}:${AIRFLOW_POSTGRES_PASSWORD:-airflow123}@airflow-postgres:5432/${AIRFLOW_POSTGRES_DB:-airflow}
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-81HqDtbqAywKSOumSha3BhWNOdQ26slT6K0YaZeZyPs=}
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${AIRFLOW_POSTGRES_USER:-airflow}:${AIRFLOW_POSTGRES_PASSWORD:-airflow123}@airflow-postgres:5432/${AIRFLOW_POSTGRES_DB:-airflow}
+      # Execution API URL for Task SDK (Airflow 3.x)
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-webserver:8080/execution
+      # JWT secret for Task SDK (Airflow 3.x) - must be same across all services
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-AirflowJWTSecretKey2026!}
+      # StatsD metrics for Prometheus
+      AIRFLOW__METRICS__STATSD_ON: "true"
+      AIRFLOW__METRICS__STATSD_HOST: statsd-exporter
+      AIRFLOW__METRICS__STATSD_PORT: 9125
+      AIRFLOW__METRICS__STATSD_PREFIX: airflow
+      # Spark configuration for BashOperator
+      SPARK_MASTER: spark://spark-master:7077
+      # MinIO/S3 credentials for Spark jobs
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123}
+      AWS_REGION: us-east-1
+    command: celery worker
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags:ro
+      - ../airflow/logs:/opt/airflow/logs
+      - ../airflow/plugins:/opt/airflow/plugins:ro
+      - ../jobs/spark:/opt/spark/jobs:ro
+      - ../sql:/opt/airflow/sql:ro
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker socket for docker exec
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-webserver:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      spark-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d celery@$${HOSTNAME} || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -561,6 +730,23 @@ services:
       - iceberg-network
 
   # ===========================================================================
+  # StatsD Exporter - Converts StatsD metrics to Prometheus format
+  # ===========================================================================
+  # Used by Airflow to export metrics to Prometheus
+  statsd-exporter:
+    image: prom/statsd-exporter:v0.26.0
+    container_name: iceberg-statsd-exporter
+    hostname: statsd-exporter
+    ports:
+      - "9102:9102"  # Prometheus metrics
+      - "9125:9125/udp"  # StatsD UDP
+    command:
+      - '--statsd.listen-udp=:9125'
+      - '--web.listen-address=:9102'
+    networks:
+      - iceberg-network
+
+  # ===========================================================================
   # Grafana - Metrics Visualization
   # ===========================================================================
   grafana:
@@ -573,7 +759,7 @@ services:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin123}
       GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_INSTALL_PLUGINS: grafana-clock-panel
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-clickhouse-datasource
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro

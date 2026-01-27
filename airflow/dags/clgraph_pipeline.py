@@ -24,11 +24,10 @@ from pathlib import Path
 from typing import List, Tuple
 
 from airflow import DAG
-from airflow.decorators import dag, task
-from airflow.operators.bash import BashOperator
-from airflow.operators.python import PythonOperator
-from airflow.operators.empty import EmptyOperator
-from airflow.utils.task_group import TaskGroup
+from airflow.sdk import dag, task, TaskGroup
+from airflow.providers.standard.operators.bash import BashOperator
+from airflow.providers.standard.operators.python import PythonOperator
+from airflow.providers.standard.operators.empty import EmptyOperator
 
 
 # =============================================================================
@@ -56,7 +55,7 @@ SPARK_SUBMIT_BASE = (
     "--conf spark.sql.catalog.iceberg.s3.path-style-access=true "
     "--conf spark.hadoop.fs.s3a.endpoint=http://minio:9000 "
     "--conf spark.hadoop.fs.s3a.access.key=admin "
-    "--conf spark.hadoop.fs.s3a.secret.key=admin123456 "
+    "--conf spark.hadoop.fs.s3a.secret.key=admin123 "
     "--conf spark.hadoop.fs.s3a.path.style.access=true "
     "--conf spark.executor.memory=2g "
     "--conf spark.driver.memory=2g"
@@ -334,7 +333,7 @@ with DAG(
     dag_id="clgraph_iceberg_pipeline",
     description="Data pipeline with dependencies auto-derived from SQL via clgraph",
     default_args=default_args,
-    schedule_interval="0 */4 * * *",  # Every 4 hours
+    schedule="0 */4 * * *",  # Every 4 hours
     start_date=datetime(2026, 1, 1),
     catchup=False,
     max_active_runs=1,
