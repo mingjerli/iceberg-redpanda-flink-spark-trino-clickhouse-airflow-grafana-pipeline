@@ -95,10 +95,10 @@ docker-compose logs --tail 100 airflow-scheduler
 
 ```bash
 # Manual trigger
-docker exec iceberg-airflow-scheduler airflow dags trigger clgraph_iceberg_pipeline
+docker exec iceberg-airflow-scheduler airflow dags trigger iceberg_pipeline
 
 # Check status
-docker exec iceberg-airflow-scheduler airflow dags list-runs -d clgraph_iceberg_pipeline
+docker exec iceberg-airflow-scheduler airflow dags list-runs -d iceberg_pipeline
 ```
 
 ### Querying Data
@@ -128,10 +128,10 @@ docker exec iceberg-spark-master /opt/spark/bin/spark-sql \
 **Diagnosis:**
 ```bash
 # Check DAG run status
-docker exec iceberg-airflow-scheduler airflow dags list-runs -d clgraph_iceberg_pipeline
+docker exec iceberg-airflow-scheduler airflow dags list-runs -d iceberg_pipeline
 
 # Check task logs
-docker exec iceberg-airflow-scheduler airflow tasks logs clgraph_iceberg_pipeline <task_id> <execution_date>
+docker exec iceberg-airflow-scheduler airflow tasks logs iceberg_pipeline <task_id> <execution_date>
 ```
 
 **Common causes:**

@@ -129,9 +129,9 @@ phase_0_cleanup() {
     docker volume rm iceberg-demo-prometheus-data 2>/dev/null || true
     docker volume rm iceberg-demo-grafana-data 2>/dev/null || true
 
-    log_step "Cleaning up DAG files (keeping clgraph_pipeline.py)..."
-    # Keep clgraph_pipeline.py, remove others if they exist
-    find "$PROJECT_DIR/airflow/dags" -name "*.py" ! -name "clgraph_pipeline.py" ! -name "__init__.py" -delete 2>/dev/null || true
+    log_step "Cleaning up DAG files (keeping iceberg_pipeline.py and clgraph_pipeline.py)..."
+    # Keep both DAG files, remove others if they exist
+    find "$PROJECT_DIR/airflow/dags" -name "*.py" ! -name "iceberg_pipeline.py" ! -name "clgraph_pipeline.py" ! -name "__init__.py" -delete 2>/dev/null || true
 
     log_step "Cleaning up Airflow logs..."
     rm -rf "$PROJECT_DIR/airflow/logs"/* 2>/dev/null || true
@@ -451,7 +451,7 @@ phase_5b_airflow_dag() {
 
     cd "$INFRA_DIR"
 
-    local DAG_ID="clgraph_iceberg_pipeline"
+    local DAG_ID="iceberg_pipeline"
     local MAX_WAIT=120
     local WAIT_INTERVAL=10
 
@@ -545,7 +545,7 @@ print_summary() {
     echo ""
     echo "Next steps:"
     echo "  1. Open Airflow UI: http://localhost:8086 (admin/admin123)"
-    echo "  2. Check DAG status: clgraph_iceberg_pipeline"
+    echo "  2. Check DAG status: iceberg_pipeline"
     echo "  3. Query data via Trino: docker exec -it iceberg-trino trino"
     echo "  4. View MinIO data: http://localhost:9001 (admin/admin123)"
     echo ""

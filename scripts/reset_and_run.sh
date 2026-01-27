@@ -442,7 +442,7 @@ trigger_airflow_dag() {
 
     cd "$INFRA_DIR"
 
-    local DAG_ID="clgraph_iceberg_pipeline"
+    local DAG_ID="iceberg_pipeline"
     local MAX_WAIT=120
     local WAIT_INTERVAL=10
 
@@ -525,7 +525,7 @@ main() {
     echo "  Next steps:"
     echo "  ───────────────────────────────────────────────────────────"
     echo "  1. Open Airflow: http://localhost:8086 (admin/admin123)"
-    echo "  2. Watch DAG: clgraph_iceberg_pipeline"
+    echo "  2. Watch DAG: iceberg_pipeline"
     echo "  3. Query data: docker exec -it iceberg-trino trino"
     echo ""
     echo "  Troubleshooting:"

@@ -333,7 +333,7 @@ with DAG(
     dag_id="clgraph_iceberg_pipeline",
     description="Data pipeline with dependencies auto-derived from SQL via clgraph",
     default_args=default_args,
-    schedule="0 */4 * * *",  # Every 4 hours
+    schedule=None,  # Manual trigger only (use iceberg_pipeline.py for scheduled runs)
     start_date=datetime(2026, 1, 1),
     catchup=False,
     max_active_runs=1,

@@ -23,190 +23,139 @@ For detailed rationale on why each tool was chosen, see [ARCHITECTURE.md](../ARC
 
 ---
 
-## Service Details
+## Service Configuration & Troubleshooting
 
-### MinIO (Object Storage)
+For rationale on why each tool was chosen, see [ARCHITECTURE.md](../ARCHITECTURE.md#infrastructure-why-each-tool).
 
-**What it does:** Stores all Iceberg data files (Parquet) and metadata.
+### MinIO
 
-**Why it's needed:** Iceberg separates compute from storage. MinIO provides S3-compatible storage that works identically to AWS S3, enabling local development without cloud costs.
+| Setting | Value |
+|---------|-------|
+| Credentials | `admin` / `admin123` |
+| Bucket | `warehouse` (created on startup) |
+| Path style | Required (`s3.path-style-access=true`) |
 
-**Key configuration:**
-- Path-style access required (`s3.path-style-access=true`)
-- Bucket `warehouse` created on startup
-- Credentials: `admin` / `admin123`
-
-**When to check it:**
-- "Table not found" errors → verify bucket exists
-- Slow queries → check if data files are fragmented
-
----
+**Troubleshooting:**
+- "Table not found" → verify bucket exists in Console
+- Slow queries → check if data files are fragmented (too many small files)
 
 ### Iceberg REST Catalog
 
-**What it does:** Tracks where Iceberg tables live and their current schema/snapshot state.
+| Setting | Value |
+|---------|-------|
+| Backend | PostgreSQL JDBC (not SQLite) |
+| Warehouse | `s3a://warehouse/` |
 
-**Why it's needed:** Multiple engines (Spark, Flink, Trino) need a shared, consistent view of table metadata. Without a catalog, each engine would have its own (potentially stale) view.
-
-**Key configuration:**
-- PostgreSQL JDBC backend (not SQLite) for concurrent access
-- Warehouse location: `s3a://warehouse/`
-
-**When to check it:**
-- "Table not found" but data exists → catalog out of sync
-- Concurrent job failures → check PostgreSQL locks
-
----
+**Troubleshooting:**
+- "Table not found" but data exists → catalog out of sync, restart catalog
+- Concurrent job failures → check PostgreSQL for lock contention
 
 ### PostgreSQL
 
-**What it does:** Stores Iceberg catalog metadata and Airflow metadata.
+| Setting | Value |
+|---------|-------|
+| Iceberg database | `iceberg_catalog` |
+| Airflow database | `airflow` |
+| Credentials | `airflow` / `airflow123` |
 
-**Why it's needed:** SQLite (Iceberg's default) locks under concurrent access. PostgreSQL handles multiple Spark/Flink jobs writing simultaneously.
+**Troubleshooting:**
+- Catalog errors → verify PostgreSQL is healthy (`docker logs`)
+- Airflow issues → check connection pool exhaustion
 
-**Key configuration:**
-- Database `iceberg_catalog` for Iceberg
-- Database `airflow` for Airflow
-- User: `airflow` / `airflow123`
+### Redpanda
 
-**When to check it:**
-- Catalog errors → verify PostgreSQL is healthy
-- Airflow issues → check connection pool
+| Setting | Value |
+|---------|-------|
+| Topics | `shopify.orders`, `shopify.customers`, `stripe.charges`, `hubspot.contacts` |
+| Partitions | 1 per topic (demo scale) |
+| Auth | None (demo only) |
 
----
+**Troubleshooting:**
+- Data not in raw layer → check topic lag in Console (:8080)
+- Flink job failing → verify topics exist (`rpk topic list`)
 
-### Redpanda (Message Queue)
+### Apache Flink
 
-**What it does:** Buffers webhook events between the Ingestion API and Flink.
+| Setting | Value |
+|---------|-------|
+| Task slots | 4 per TaskManager |
+| Checkpoints | MinIO (exactly-once) |
+| Jobs | `/jobs/flink/*.sql` |
 
-**Why it's needed:** Webhooks arrive in real-time bursts. Flink processes at a steady rate. Redpanda decouples these speeds and enables replay on failure.
-
-**Key configuration:**
-- Topics: `shopify.orders`, `shopify.customers`, `stripe.charges`, `hubspot.contacts`
-- Single partition per topic (demo scale)
-- No authentication (demo only)
-
-**When to check it:**
-- Data not appearing in raw layer → check topic lag in Console
-- Flink job failing → verify topics exist
-
----
-
-### Apache Flink (Streaming)
-
-**What it does:** Reads from Kafka topics and writes to Iceberg raw tables in real-time.
-
-**Why it's needed:** Sub-second latency from webhook to queryable data. Spark Structured Streaming has higher latency; Flink provides true streaming.
-
-**Key configuration:**
-- Checkpoints to MinIO for exactly-once delivery
-- 4 task slots per TaskManager
-- Jobs defined in `/jobs/flink/*.sql`
-
-**When to check it:**
+**Troubleshooting:**
 - Raw layer not updating → check job status at `:8083`
 - Duplicate data → verify checkpointing is working
 
----
+### Apache Spark
 
-### Apache Spark (Batch Processing)
+| Setting | Value |
+|---------|-------|
+| Workers | 1 (4 cores, 4GB RAM) |
+| Jobs | `/jobs/spark/*.py` |
+| S3 config | Both Hadoop S3A and Iceberg S3 required |
 
-**What it does:** Transforms data through staging → semantic → analytics → marts layers.
-
-**Why it's needed:** Complex transformations (entity resolution, aggregations, joins) require distributed processing. Flink SQL is limited for these operations.
-
-**Key configuration:**
-- 1 worker with 4 cores, 4GB RAM (demo scale)
-- Jobs defined in `/jobs/spark/*.py`
-- Requires both Hadoop S3A and Iceberg S3 configs
-
-**When to check it:**
+**Troubleshooting:**
 - Job failures → check Master UI at `:8084`
-- OOM errors → increase executor memory
-- Slow jobs → check for data skew
+- OOM errors → increase executor memory in spark-submit
+- Slow jobs → check for data skew in Spark UI
 
----
+### Apache Airflow
 
-### Apache Airflow (Orchestration)
+| Setting | Value |
+|---------|-------|
+| Executor | CeleryExecutor with Redis |
+| DAGs | `/airflow/dags/iceberg_pipeline.py` |
+| Credentials | `admin` / `admin123` |
 
-**What it does:** Schedules and monitors batch job execution with dependency management.
-
-**Why it's needed:** Staging must complete before analytics. Failures need retries. Operators need visibility into what ran and when.
-
-**Key configuration:**
-- CeleryExecutor with Redis broker
-- DAG in `/airflow/dags/clgraph_pipeline.py`
-- Credentials: `admin` / `admin123`
-
-**When to check it:**
+**Troubleshooting:**
 - Pipeline not running → check scheduler logs
-- Task failures → view task logs in UI
+- Task failures → view task logs in UI (:8086)
 
----
+### Trino
 
-### Trino (Query Engine)
+| Setting | Value |
+|---------|-------|
+| Catalog | `iceberg` (configured in `/trino/catalog/`) |
+| Memory | 1GB per query (demo scale) |
 
-**What it does:** Provides interactive SQL access to Iceberg tables for ad-hoc analysis.
+**Troubleshooting:**
+- Query errors → verify catalog configuration matches Iceberg REST
+- Slow queries → tables may need compaction
 
-**Why it's needed:** Spark SQL requires spinning up executors. Trino gives sub-second query startup for exploration.
+### ClickHouse
 
-**Key configuration:**
-- Catalog `iceberg` configured in `/trino/catalog/iceberg.properties`
-- Memory: 1GB per query (demo scale)
+| Setting | Value |
+|---------|-------|
+| Credentials | `default` / `admin123` |
+| Iceberg setup | `/clickhouse/iceberg_setup.sql` |
 
-**When to check it:**
-- Query errors → verify catalog configuration
-- Slow queries → check if tables need compaction
-
----
-
-### ClickHouse (OLAP)
-
-**What it does:** Provides millisecond query response for dashboard queries.
-
-**Why it's needed:** Some dashboard queries need faster response than Trino can provide on large datasets. ClickHouse pre-computes and caches.
-
-**Key configuration:**
-- Iceberg integration via `/clickhouse/iceberg_setup.sql`
-- Credentials: `default` / `admin123`
-
-**When to check it:**
+**Troubleshooting:**
 - Dashboard latency → check materialized view freshness
-- Data mismatch → verify sync with Iceberg
+- Data mismatch → verify sync with Iceberg tables
 
----
+### Ingestion API
 
-### Ingestion API (FastAPI)
+| Setting | Value |
+|---------|-------|
+| Port | 8090 |
+| Auth | None (demo only) |
+| Health | `/health` |
 
-**What it does:** Receives webhooks from Shopify, Stripe, HubSpot and publishes to Kafka topics.
+**Troubleshooting:**
+- No data arriving → verify API is receiving requests (`docker logs`)
+- Malformed data → check API validation errors in logs
 
-**Why it's needed:** External systems push data via webhooks. The API validates payloads and routes to appropriate topics.
+### Grafana + Prometheus
 
-**Key configuration:**
-- Port 8090
-- No authentication (demo only)
-- Health check: `/health`
+| Setting | Value |
+|---------|-------|
+| Grafana credentials | `admin` / `admin123` |
+| Dashboards | `/monitoring/dashboards/` |
+| Scrape targets | Flink, Spark, Airflow |
 
-**When to check it:**
-- No data arriving → verify API is receiving requests
-- Malformed data → check API logs
-
----
-
-### Grafana + Prometheus (Monitoring)
-
-**What it does:** Collects and visualizes metrics from all services.
-
-**Why it's needed:** Operators need visibility into pipeline health, job durations, and resource usage.
-
-**Key configuration:**
-- Grafana: `admin` / `admin123`
-- Pre-built dashboards in `/monitoring/dashboards/`
-- Prometheus scrapes Flink, Spark, Airflow metrics
-
-**When to check it:**
-- Performance issues → review historical metrics
-- Capacity planning → monitor resource usage trends
+**Troubleshooting:**
+- Missing metrics → verify Prometheus targets are up (:9090/targets)
+- Dashboard gaps → check scrape interval and retention
 
 ---
 

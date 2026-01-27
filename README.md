@@ -185,7 +185,7 @@ docker exec iceberg-spark-master /opt/spark/bin/spark-submit \
 #### 6. Trigger Airflow DAG
 
 ```bash
-docker exec iceberg-airflow-scheduler airflow dags trigger clgraph_iceberg_pipeline
+docker exec iceberg-airflow-scheduler airflow dags trigger iceberg_pipeline
 ```
 
 ## Service URLs
@@ -228,7 +228,7 @@ Once the pipeline is running, we can watch data flow through each component in r
 
 **4. Pipeline Orchestration (Airflow)**
 - Open http://localhost:8086 (admin/admin123)
-- View DAG: `clgraph_iceberg_pipeline`
+- View DAG: `iceberg_pipeline`
 - See task dependencies and execution order
 - Check task logs for any failures
 

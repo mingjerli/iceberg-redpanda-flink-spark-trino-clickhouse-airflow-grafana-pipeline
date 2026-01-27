@@ -76,7 +76,7 @@
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                      ORCHESTRATION (Apache Airflow)                              │
 │  ┌─────────────────────────────────────────────────────────────────────────┐    │
-│  │  DAG: clgraph_iceberg_pipeline                                          │    │
+│  │  DAG: iceberg_pipeline                                                   │    │
 │  │  • Staging tasks (4 tables)                                             │    │
 │  │  • Semantic tasks (entity resolution)                                   │    │
 │  │  • Analytics tasks (3 metrics)                                          │    │

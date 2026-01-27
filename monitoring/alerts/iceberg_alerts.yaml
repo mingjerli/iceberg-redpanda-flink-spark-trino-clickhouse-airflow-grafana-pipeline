@@ -19,19 +19,19 @@ groups:
     rules:
       # Alert when Airflow DAG fails
       - alert: PipelineFailure
-        expr: increase(airflow_dag_run_failed_total{dag_id="clgraph_iceberg_pipeline"}[1h]) > 0
+        expr: increase(airflow_dag_run_failed_total{dag_id="iceberg_pipeline"}[1h]) > 0
         for: 0m
         labels:
           severity: critical
           team: data-engineering
         annotations:
           summary: "Iceberg pipeline failed"
-          description: "The clgraph_iceberg_pipeline DAG has failed {{ $value }} times in the last hour."
+          description: "The iceberg_pipeline DAG has failed {{ $value }} times in the last hour."
           runbook_url: "https://docs/runbook#pipeline-failure"
 
       # Alert when pipeline is running too long
       - alert: PipelineDurationHigh
-        expr: airflow_dag_run_duration_seconds{dag_id="clgraph_iceberg_pipeline", state="running"} > 600
+        expr: airflow_dag_run_duration_seconds{dag_id="iceberg_pipeline", state="running"} > 600
         for: 5m
         labels:
           severity: warning
@@ -43,7 +43,7 @@ groups:
 
       # Alert when pipeline hasn't run recently
       - alert: PipelineStale
-        expr: time() - airflow_dag_last_success_timestamp{dag_id="clgraph_iceberg_pipeline"} > 21600
+        expr: time() - airflow_dag_last_success_timestamp{dag_id="iceberg_pipeline"} > 21600
         for: 5m
         labels:
           severity: warning
