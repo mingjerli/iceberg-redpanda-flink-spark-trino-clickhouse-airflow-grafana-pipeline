@@ -307,8 +307,41 @@ trigger_airflow_dag() {
 
     cd "$INFRA_DIR"
 
-    echo "Triggering clgraph_iceberg_pipeline DAG..."
-    docker exec iceberg-airflow-scheduler airflow dags trigger clgraph_iceberg_pipeline 2>/dev/null || {
+    local DAG_ID="clgraph_iceberg_pipeline"
+    local MAX_WAIT=120
+    local WAIT_INTERVAL=10
+
+    echo "Waiting for DAG to be parsed by scheduler..."
+    local elapsed=0
+    while [ $elapsed -lt $MAX_WAIT ]; do
+        # Check if DAG exists in database
+        local dag_exists=$(docker exec iceberg-airflow-postgres psql -U airflow -d airflow -t -c \
+            "SELECT COUNT(*) FROM dag WHERE dag_id = '$DAG_ID';" 2>/dev/null | tr -d ' ')
+
+        if [ "${dag_exists:-0}" -ge 1 ]; then
+            echo "  DAG found in scheduler"
+            break
+        fi
+
+        echo -n "."
+        sleep $WAIT_INTERVAL
+        elapsed=$((elapsed + WAIT_INTERVAL))
+    done
+    echo ""
+
+    if [ $elapsed -ge $MAX_WAIT ]; then
+        log_warning "DAG not found after ${MAX_WAIT}s - scheduler may still be parsing"
+        echo "  Check Airflow UI: http://localhost:8086"
+        return 1
+    fi
+
+    # Ensure DAG is unpaused (update directly in DB for reliability)
+    echo "Ensuring DAG is unpaused..."
+    docker exec iceberg-airflow-postgres psql -U airflow -d airflow -c \
+        "UPDATE dag SET is_paused = false WHERE dag_id = '$DAG_ID';" 2>/dev/null || true
+
+    echo "Triggering $DAG_ID DAG..."
+    docker exec iceberg-airflow-scheduler airflow dags trigger "$DAG_ID" 2>/dev/null || {
         log_error "Failed to trigger DAG"
         echo "  Check Airflow UI: http://localhost:8086"
         return 1
@@ -316,7 +349,7 @@ trigger_airflow_dag() {
 
     log_success "DAG triggered"
     echo ""
-    echo "  Monitor at: http://localhost:8086/dags/clgraph_iceberg_pipeline/grid"
+    echo "  Monitor at: http://localhost:8086/dags/$DAG_ID/grid"
 }
 
 # =============================================================================
