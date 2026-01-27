@@ -340,6 +340,7 @@ with DAG(
     max_active_tasks=1,  # Serialize tasks to prevent Iceberg catalog (SQLite) lock contention
     tags=["iceberg", "incremental", "clgraph"],
     doc_md=__doc__,
+    is_paused_upon_creation=False,  # Start unpaused by default for demo
 ) as dag:
 
     # Start and end markers
