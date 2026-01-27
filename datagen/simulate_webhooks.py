@@ -122,12 +122,12 @@ class WebhookSimulator:
 
         # Wrap in Stripe event envelope
         event = {
-            "id": f"evt_{self.stripe._generate_id(24)}",
+            "id": self.stripe._stripe_id("evt", "event"),
             "object": "event",
             "api_version": "2024-12-18.acacia",
             "created": int(datetime.now(timezone.utc).timestamp()),
             "data": {"object": customer},
-            "livemode": False,
+            "livemode": True,
             "pending_webhooks": 1,
             "type": "customer.created",
         }
@@ -149,12 +149,12 @@ class WebhookSimulator:
 
         # Wrap in Stripe event envelope
         event = {
-            "id": f"evt_{self.stripe._generate_id(24)}",
+            "id": self.stripe._stripe_id("evt", "event"),
             "object": "event",
             "api_version": "2024-12-18.acacia",
             "created": int(datetime.now(timezone.utc).timestamp()),
             "data": {"object": charge},
-            "livemode": False,
+            "livemode": True,
             "pending_webhooks": 1,
             "type": "charge.succeeded",
         }

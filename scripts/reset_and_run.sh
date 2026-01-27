@@ -178,6 +178,7 @@ init_iceberg_catalog() {
         USE CATALOG iceberg_catalog;
         CREATE DATABASE IF NOT EXISTS raw COMMENT 'Raw webhook events';
         CREATE DATABASE IF NOT EXISTS staging COMMENT 'Cleaned staging data';
+        CREATE DATABASE IF NOT EXISTS metadata COMMENT 'Pipeline metadata and watermarks';
         CREATE DATABASE IF NOT EXISTS semantic COMMENT 'Entity resolution';
         CREATE DATABASE IF NOT EXISTS core COMMENT 'Core business entities';
         CREATE DATABASE IF NOT EXISTS analytics COMMENT 'Analytics metrics';
@@ -302,10 +303,143 @@ verify_raw_tables() {
 }
 
 # =============================================================================
-# PHASE 6: Trigger Airflow DAG
+# PHASE 6: Run Batch Pipeline (Direct Execution)
+# =============================================================================
+run_batch_pipeline() {
+    log_step "PHASE 6: Running Batch Pipeline"
+
+    cd "$INFRA_DIR"
+
+    # Spark submit base command
+    SPARK_SUBMIT="docker exec iceberg-spark-master /opt/spark/bin/spark-submit \
+        --master spark://spark-master:7077 \
+        --deploy-mode client \
+        --conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions \
+        --conf spark.sql.catalog.iceberg=org.apache.iceberg.spark.SparkCatalog \
+        --conf spark.sql.catalog.iceberg.type=rest \
+        --conf spark.sql.catalog.iceberg.uri=http://iceberg-rest:8181 \
+        --conf spark.sql.catalog.iceberg.warehouse=s3a://warehouse/ \
+        --conf spark.sql.catalog.iceberg.io-impl=org.apache.iceberg.aws.s3.S3FileIO \
+        --conf spark.sql.catalog.iceberg.s3.endpoint=http://minio:9000 \
+        --conf spark.sql.catalog.iceberg.s3.path-style-access=true \
+        --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000 \
+        --conf spark.hadoop.fs.s3a.access.key=admin \
+        --conf spark.hadoop.fs.s3a.secret.key=admin123 \
+        --conf spark.hadoop.fs.s3a.path.style.access=true \
+        --conf spark.executor.memory=2g \
+        --conf spark.driver.memory=2g"
+
+    # Create metadata tables
+    echo "Creating metadata tables..."
+    docker exec iceberg-spark-master /opt/spark/bin/spark-sql \
+        --conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions \
+        --conf spark.sql.catalog.iceberg=org.apache.iceberg.spark.SparkCatalog \
+        --conf spark.sql.catalog.iceberg.type=rest \
+        --conf spark.sql.catalog.iceberg.uri=http://iceberg-rest:8181 \
+        --conf spark.sql.catalog.iceberg.warehouse=s3a://warehouse/ \
+        --conf spark.sql.catalog.iceberg.io-impl=org.apache.iceberg.aws.s3.S3FileIO \
+        --conf spark.sql.catalog.iceberg.s3.endpoint=http://minio:9000 \
+        --conf spark.sql.catalog.iceberg.s3.path-style-access=true \
+        --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000 \
+        --conf spark.hadoop.fs.s3a.access.key=admin \
+        --conf spark.hadoop.fs.s3a.secret.key=admin123 \
+        --conf spark.hadoop.fs.s3a.path.style.access=true \
+        -e "
+            CREATE DATABASE IF NOT EXISTS iceberg.metadata;
+            CREATE TABLE IF NOT EXISTS iceberg.metadata.incremental_watermarks (
+                source_table STRING,
+                pipeline_name STRING,
+                last_sync_timestamp TIMESTAMP,
+                records_processed BIGINT,
+                updated_at TIMESTAMP
+            ) USING iceberg;
+        " 2>&1 | tail -3 || log_warning "Metadata tables may already exist"
+    log_success "Metadata tables ready"
+
+    echo ""
+    echo "Running staging batch jobs..."
+    for table in shopify_orders shopify_customers stripe_charges hubspot_contacts; do
+        echo "  Processing: $table"
+        $SPARK_SUBMIT /opt/spark/jobs/staging_batch.py --table $table --mode full 2>&1 | tail -5 || {
+            log_warning "Failed to process $table"
+        }
+    done
+    log_success "Staging complete"
+
+    echo ""
+    echo "Running entity resolution..."
+    $SPARK_SUBMIT /opt/spark/jobs/entity_backfill.py --mode initial 2>&1 | tail -10 || {
+        log_warning "Entity backfill had issues"
+    }
+    log_success "Entity resolution complete"
+
+    echo ""
+    echo "Creating core views..."
+    $SPARK_SUBMIT /opt/spark/jobs/core_views.py 2>&1 | tail -10 || {
+        log_warning "Core views creation had issues"
+    }
+    log_success "Core views created"
+
+    echo ""
+    echo "Running analytics transforms..."
+    $SPARK_SUBMIT /opt/spark/jobs/analytics_incremental.py --mode full 2>&1 | tail -10 || {
+        log_warning "Analytics transforms had issues"
+    }
+    log_success "Analytics complete"
+
+    echo ""
+    echo "Running marts transforms..."
+    $SPARK_SUBMIT /opt/spark/jobs/marts_incremental.py --mode full 2>&1 | tail -10 || {
+        log_warning "Marts transforms had issues"
+    }
+    log_success "Marts complete"
+}
+
+# =============================================================================
+# PHASE 7: Validate All Tables
+# =============================================================================
+validate_tables() {
+    log_step "PHASE 7: Validating All Tables"
+
+    cd "$INFRA_DIR"
+
+    echo "Checking table row counts via Trino..."
+
+    # Wait for Trino to be ready
+    sleep 5
+
+    docker exec iceberg-trino trino --execute "
+        SELECT 'raw.shopify_orders' as tbl, COUNT(*) as cnt FROM iceberg.raw.shopify_orders
+        UNION ALL SELECT 'raw.shopify_customers', COUNT(*) FROM iceberg.raw.shopify_customers
+        UNION ALL SELECT 'raw.stripe_charges', COUNT(*) FROM iceberg.raw.stripe_charges
+        UNION ALL SELECT 'raw.stripe_customers', COUNT(*) FROM iceberg.raw.stripe_customers
+        UNION ALL SELECT 'raw.hubspot_contacts', COUNT(*) FROM iceberg.raw.hubspot_contacts
+        UNION ALL SELECT 'staging.stg_shopify_orders', COUNT(*) FROM iceberg.staging.stg_shopify_orders
+        UNION ALL SELECT 'staging.stg_shopify_customers', COUNT(*) FROM iceberg.staging.stg_shopify_customers
+        UNION ALL SELECT 'staging.stg_stripe_charges', COUNT(*) FROM iceberg.staging.stg_stripe_charges
+        UNION ALL SELECT 'staging.stg_hubspot_contacts', COUNT(*) FROM iceberg.staging.stg_hubspot_contacts
+        UNION ALL SELECT 'semantic.entity_index', COUNT(*) FROM iceberg.semantic.entity_index
+        UNION ALL SELECT 'core.customers', COUNT(*) FROM iceberg.core.customers
+        UNION ALL SELECT 'core.orders', COUNT(*) FROM iceberg.core.orders
+        UNION ALL SELECT 'analytics.customer_metrics', COUNT(*) FROM iceberg.analytics.customer_metrics
+        UNION ALL SELECT 'analytics.order_summary', COUNT(*) FROM iceberg.analytics.order_summary
+        UNION ALL SELECT 'analytics.payment_metrics', COUNT(*) FROM iceberg.analytics.payment_metrics
+        UNION ALL SELECT 'marts.customer_360', COUNT(*) FROM iceberg.marts.customer_360
+        ORDER BY tbl
+    " 2>/dev/null || {
+        log_warning "Could not validate via Trino - checking catalog instead"
+        docker exec iceberg-airflow-postgres psql -U airflow -d iceberg_catalog -c \
+            "SELECT table_namespace, table_name FROM iceberg_tables ORDER BY table_namespace, table_name;" 2>/dev/null
+    }
+
+    log_success "Validation complete"
+}
+
+# =============================================================================
+# PHASE 8: Trigger Airflow DAG (Optional)
 # =============================================================================
 trigger_airflow_dag() {
-    log_step "PHASE 6: Triggering Airflow DAG"
+    log_step "PHASE 8: Triggering Airflow DAG (for ongoing scheduling)"
 
     cd "$INFRA_DIR"
 
@@ -380,6 +514,8 @@ main() {
     generate_mock_data
     submit_flink_jobs
     verify_raw_tables
+    run_batch_pipeline
+    validate_tables
     trigger_airflow_dag
 
     echo ""

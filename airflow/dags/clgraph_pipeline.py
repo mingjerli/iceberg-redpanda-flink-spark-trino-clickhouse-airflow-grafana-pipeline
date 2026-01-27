@@ -380,10 +380,16 @@ with DAG(
     with TaskGroup(group_id="core", tooltip="Core Views") as core_group:
         for query_id in dependencies:
             if query_id.startswith("03_core"):
-                # Core views are computed on query, but we still need a placeholder
+                # Core views need to be created/refreshed
+                if "customers" in query_id:
+                    view_name = "customers"
+                elif "orders" in query_id:
+                    view_name = "orders"
+                else:
+                    view_name = "all"
                 tasks[query_id] = BashOperator(
                     task_id=query_id,
-                    bash_command="echo 'Core view - computed on query'",
+                    bash_command=f"{SPARK_SUBMIT_BASE} {SPARK_JOBS_PATH}/core_views.py --view {view_name}",
                 )
 
     with TaskGroup(group_id="analytics", tooltip="Analytics Layer") as analytics_group:

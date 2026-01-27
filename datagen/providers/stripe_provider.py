@@ -86,9 +86,9 @@ class StripeProvider:
             shared: Optional shared customer data for cross-source consistency
         """
         customer_id = self._stripe_id("cus", "customer")
-        created = shared["created_at"] if shared else self.fake.date_time_between(
-            start_date="-2y", end_date="-1d"
-        )
+        created = shared.get("created_at") if shared else None
+        if not created:
+            created = self.fake.date_time_between(start_date="-2y", end_date="-1d")
 
         email = shared["email"] if shared else self.fake.email()
         name = f"{shared['first_name']} {shared['last_name']}" if shared else self.fake.name()
@@ -115,7 +115,7 @@ class StripeProvider:
                 "footer": None,
                 "rendering_options": None,
             },
-            "livemode": False,
+            "livemode": True,
             "metadata": {"source": "demo_generator"} if random.random() > 0.5 else {},
             "name": name,
             "next_invoice_sequence": random.randint(1, 100),
@@ -212,7 +212,7 @@ class StripeProvider:
             "failure_message": failure_message,
             "fraud_details": {},
             "invoice": None,
-            "livemode": False,
+            "livemode": True,
             "metadata": {},
             "on_behalf_of": None,
             "outcome": {
@@ -298,7 +298,7 @@ class StripeProvider:
             "invoice": None,
             "last_payment_error": None,
             "latest_charge": self._stripe_id("ch", "charge") if status == "succeeded" else None,
-            "livemode": False,
+            "livemode": True,
             "metadata": {},
             "next_action": None,
             "on_behalf_of": None,
@@ -393,7 +393,7 @@ class StripeProvider:
                 "has_more": False,
             },
             "latest_invoice": self._stripe_id("in", "subscription"),
-            "livemode": False,
+            "livemode": True,
             "metadata": {},
             "next_pending_invoice_item_invoice": None,
             "on_behalf_of": None,
@@ -514,7 +514,7 @@ class StripeProvider:
                 "submission_count": 0,
             },
             "is_charge_refundable": status in ["needs_response", "under_review"],
-            "livemode": False,
+            "livemode": True,
             "metadata": {},
             "network_reason_code": None,
             "payment_intent": charge.get("payment_intent"),
