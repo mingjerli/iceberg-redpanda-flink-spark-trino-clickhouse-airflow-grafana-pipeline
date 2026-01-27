@@ -193,18 +193,34 @@ generate_mock_data() {
 
     cd "$PROJECT_DIR"
 
-    # Check if dependencies are available
+    # Determine Python executable to use
+    PYTHON_CMD="python3"
+    VENV_DIR="$PROJECT_DIR/.venv"
+
+    # Setup virtual environment if dependencies not available
     if ! python3 -c "import click, httpx, faker" 2>/dev/null; then
-        echo "Installing Python dependencies..."
-        # Try different installation methods
-        if pip3 install --user -q click httpx faker 2>/dev/null; then
-            log_success "Dependencies installed with --user"
-        elif command -v uv &>/dev/null; then
-            uv pip install click httpx faker 2>/dev/null || true
+        echo "Setting up Python environment..."
+
+        if command -v uv &>/dev/null; then
+            # Use uv (fast, modern package manager)
+            echo "  Using uv to create virtual environment..."
+            uv venv "$VENV_DIR" 2>/dev/null || true
+            uv pip install --quiet click httpx faker 2>/dev/null
+            PYTHON_CMD="$VENV_DIR/bin/python"
+            log_success "Dependencies installed with uv"
+        elif [ -d "$VENV_DIR" ]; then
+            # Activate existing venv
+            source "$VENV_DIR/bin/activate"
+            pip install --quiet click httpx faker 2>/dev/null
+            PYTHON_CMD="$VENV_DIR/bin/python"
+            log_success "Dependencies installed in existing venv"
         else
-            log_warning "Could not install dependencies automatically"
-            echo "  Please run: pip3 install click httpx faker"
-            echo "  Or: python3 -m venv .venv && source .venv/bin/activate && pip install click httpx faker"
+            # Create new venv with standard python
+            echo "  Creating virtual environment..."
+            python3 -m venv "$VENV_DIR"
+            "$VENV_DIR/bin/pip" install --quiet click httpx faker
+            PYTHON_CMD="$VENV_DIR/bin/python"
+            log_success "Dependencies installed in new venv"
         fi
     fi
 
@@ -214,7 +230,7 @@ generate_mock_data() {
     echo "  HubSpot: $HUBSPOT_CONTACTS contacts"
     echo ""
 
-    python3 scripts/post_mock_data.py \
+    "$PYTHON_CMD" scripts/post_mock_data.py \
         --url http://localhost:8090 \
         --shopify-customers "$SHOPIFY_CUSTOMERS" \
         --shopify-orders "$SHOPIFY_ORDERS" \
