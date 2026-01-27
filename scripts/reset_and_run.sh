@@ -258,7 +258,7 @@ submit_flink_jobs() {
     echo ""
 
     # Submit each ingestion job
-    for job in shopify_orders shopify_customers stripe_charges hubspot_contacts; do
+    for job in shopify_orders shopify_customers stripe_charges stripe_customers hubspot_contacts; do
         job_file="/opt/flink/jobs/${job}_full.sql"
         echo "  Submitting: $job..."
         docker exec iceberg-flink-jobmanager /opt/flink/bin/sql-client.sh embedded \
@@ -412,7 +412,6 @@ validate_tables() {
         SELECT 'raw.shopify_orders' as tbl, COUNT(*) as cnt FROM iceberg.raw.shopify_orders
         UNION ALL SELECT 'raw.shopify_customers', COUNT(*) FROM iceberg.raw.shopify_customers
         UNION ALL SELECT 'raw.stripe_charges', COUNT(*) FROM iceberg.raw.stripe_charges
-        UNION ALL SELECT 'raw.stripe_customers', COUNT(*) FROM iceberg.raw.stripe_customers
         UNION ALL SELECT 'raw.hubspot_contacts', COUNT(*) FROM iceberg.raw.hubspot_contacts
         UNION ALL SELECT 'staging.stg_shopify_orders', COUNT(*) FROM iceberg.staging.stg_shopify_orders
         UNION ALL SELECT 'staging.stg_shopify_customers', COUNT(*) FROM iceberg.staging.stg_shopify_customers

@@ -466,7 +466,7 @@ def compute_order_summary(spark: SparkSession, mode: str = "incremental"):
         hour(col("created_at")).alias("order_hour"),
         coalesce(col("shipping_country"), lit("Unknown")).alias("shipping_country"),
         coalesce(col("shipping_country_code"), lit("XX")).alias("shipping_country_code"),
-        coalesce(col("shipping_province"), lit("Unknown")).alias("shipping_state"),
+        coalesce(col("shipping_state"), lit("Unknown")).alias("shipping_state"),
         coalesce(col("channel"), lit("Unknown")).alias("channel"),
         col("source")
     ).agg(
