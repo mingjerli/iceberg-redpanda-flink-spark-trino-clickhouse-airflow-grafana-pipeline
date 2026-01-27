@@ -10,7 +10,7 @@ set -e
 
 MINIO_HOST="${MINIO_ENDPOINT:-http://minio:9000}"
 MINIO_USER="${MINIO_ROOT_USER:-admin}"
-MINIO_PASS="${MINIO_ROOT_PASSWORD:-admin123456}"
+MINIO_PASS="${MINIO_ROOT_PASSWORD:-admin123}"
 
 # Wait for MinIO to be ready by attempting to configure mc alias
 echo "Waiting for MinIO to be ready at ${MINIO_HOST}..."
@@ -51,6 +51,12 @@ if ! mc ls "local/${RAW_EVENTS_BUCKET}" > /dev/null 2>&1; then
 else
     echo "Bucket ${RAW_EVENTS_BUCKET} already exists"
 fi
+
+# Create spark-events directory for Spark event logging
+echo "Creating spark-events directory in warehouse bucket..."
+# Create an empty object to ensure the directory exists
+echo "" | mc pipe "local/${WAREHOUSE_BUCKET}/spark-events/.keep"
+echo "spark-events directory created"
 
 # Set bucket policies for public read (optional, useful for debugging)
 # Uncomment if you want public read access
