@@ -428,7 +428,7 @@ def compute_order_summary(spark: SparkSession, mode: str = "incremental"):
     if mode == "incremental":
         watermark = get_watermark(spark, "order_summary")
         if watermark:
-            logger.info(f"Incremental filter: _staged_at > {watermark}")
+            logger.info(f"Incremental filter: staged_at > {watermark}")
 
     # Read orders
     try:
@@ -446,9 +446,9 @@ def compute_order_summary(spark: SparkSession, mode: str = "incremental"):
         logger.error(f"Could not read orders: {e}")
         return 0
 
-    # Apply watermark filter
+    # Apply watermark filter (core.orders uses staged_at)
     if watermark and mode == "incremental":
-        orders_df = orders_df.filter(col("_staged_at") > watermark)
+        orders_df = orders_df.filter(col("staged_at") > watermark)
 
     # Filter test orders
     orders_df = orders_df.filter(col("is_test") == False)
@@ -558,7 +558,7 @@ def compute_payment_metrics(spark: SparkSession, mode: str = "incremental"):
     if mode == "incremental":
         watermark = get_watermark(spark, "payment_metrics")
         if watermark:
-            logger.info(f"Incremental filter: _staged_at > {watermark}")
+            logger.info(f"Incremental filter: staged_at > {watermark}")
 
     # Read charges
     try:
