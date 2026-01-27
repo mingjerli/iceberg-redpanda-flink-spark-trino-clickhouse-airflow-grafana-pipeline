@@ -202,6 +202,54 @@ docker exec iceberg-airflow-scheduler airflow dags trigger iceberg_pipeline
 | Trino | http://localhost:8085 | - |
 | Ingestion API | http://localhost:8090 | - |
 
+## UI Screenshots
+
+### Airflow DAG
+
+The pipeline orchestration showing task dependencies and run status:
+
+![Airflow DAG Grid](docs/screenshots/airflow_dag_grid.png)
+
+DAG list showing both pipelines:
+
+![Airflow DAG List](docs/screenshots/airflow_dag_list.png)
+
+### Flink Streaming
+
+Real-time streaming jobs consuming from Kafka and writing to Iceberg:
+
+![Flink Dashboard](docs/screenshots/flink_dashboard.png)
+
+### Spark Master
+
+Batch processing cluster status:
+
+![Spark Master](docs/screenshots/spark_master.png)
+
+### MinIO Storage
+
+Object storage browser showing Iceberg data files:
+
+![MinIO Console](docs/screenshots/minio_console.png)
+
+### Redpanda Console
+
+Kafka topics receiving webhook events:
+
+![Redpanda Console](docs/screenshots/redpanda_console.png)
+
+### Monitoring
+
+Prometheus targets for metrics collection:
+
+![Prometheus Targets](docs/screenshots/prometheus_targets.png)
+
+Grafana dashboards:
+
+![Grafana Dashboards](docs/screenshots/grafana_dashboard.png)
+
+---
+
 ## Observing the Pipeline in Action
 
 Once the pipeline is running, we can watch data flow through each component in real-time.
