@@ -638,11 +638,11 @@ services:
       spark-master:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --local"]
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 30s
     networks:
       - iceberg-network
 
@@ -671,7 +671,7 @@ services:
       airflow-init:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "airflow jobs check --job-type DagProcessorJob --local"]
+      test: ["CMD-SHELL", "airflow jobs check --job-type DagProcessorJob --hostname \"$${HOSTNAME}\""]
       interval: 30s
       timeout: 10s
       retries: 5
