@@ -1,11 +1,50 @@
-# Iceberg Incremental Demo
+# Iceberg + Redpanda + Flink + Spark + Trino + ClickHouse + Airflow + Grafana Pipeline
 
-A realistic enterprise data platform demo combining **Apache Iceberg**, **incremental loading**, and a **semantic layer** for entity resolution across multiple SaaS sources.
+This is a production-style(but not production-ready) data platform combining real-time streaming and batch processing with Apache Iceberg as the unified storage layer. Demonstrates entity resolution across Shopify, Stripe, and HubSpot data sources.
+
+**DISCLOSURE:Majority of the content are written with Claude(with human guided) ... as you can expected.**
+
+## Who This Project Is For
+
+This repository is **not a beginner tutorial**. It assumes you already understand:
+
+- **Data warehouse concepts**: Dimensional modeling, fact/dimension tables, slowly changing dimensions
+- **ETL fundamentals**: Extract-transform-load patterns, batch vs streaming trade-offs
+- **SQL proficiency**: Window functions, CTEs, joins, aggregations
+- **Docker basics**: Containers, volumes, compose files, networking
+- **Distributed systems concepts**: Message queues, eventual consistency
+
+However, with coding agents, the barrier is much lower now. 
+
+**Target audience:**
+- Engineers who have read articles about some of the technologies( Iceberg, Flink, or modern data stacks) used in this repo but haven't seen them work together
+- Teams evaluating architecture patterns for multi-source data integration and want to see live action before fully committing engineering resources
+- Teams building greenfield projects that want some jump starts
+- Anyone who wants a working reference implementation rather than toy examples
+
+## Why This Demo Exists
+
+When I first time learned about Apache Iceberg, I feel it's a great idea and wanted to give it a try. Once I passed the quickstart section, like every other tools, I was struggled to find a personal side project that is suitable for that. There are many beginner tutorials or conceptual articles available online explaining:
+
+- "What is Apache Iceberg?" Without showing us how to wire it with Flink streaming input AND Spark batch process and consumed by different engines.
+- "Incremental processing patterns" Without telling us how to do watermark tables, partition-level updates, and failure recovery implemented together
+- "Entity resolution techniques" Without explaining how blocking indexes and fuzzy matching work in a real pipeline
+
+Thus, I started this repo. It's a **working reference implementation** that you can run locally, inspect, and adapt—not a simplified teaching example.
+
+## Documentation
+
+| Document | Purpose |
+|----------|---------|
+| [README.md](./README.md) | Quick start and overview (this file) |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | System design, infrastructure rationale, data layer philosophy |
+| [infrastructure/README.md](./infrastructure/README.md) | Service-by-service guide with tool selection rationale |
+| [docs/RUNBOOK.md](./docs/RUNBOOK.md) | Operational procedures and troubleshooting |
 
 ## Overview
 
 This demo simulates a modern data platform that:
-- Ingests data from **Shopify**, **Stripe**, and **HubSpot** via webhooks
+- Ingests data from **Shopify**(e-commerce store), **Stripe**(payment), and **HubSpot**(CRM) via webhooks
 - Stores data in **Apache Iceberg** tables with PostgreSQL catalog backend
 - Uses **Flink SQL** for real-time streaming from Kafka to Iceberg raw layer
 - Uses **Spark** for batch processing through staging → semantic → analytics → marts
@@ -15,10 +54,10 @@ This demo simulates a modern data platform that:
 
 ## Prerequisites
 
-- **Docker** and **Docker Compose** (v2.x recommended)
+- **Docker** and **Docker Compose**
 - **Python 3.9+** (for mock data generation)
-- At least **8GB RAM** available for Docker
-- Ports available: 8080-8090, 9000-9001, 19092
+- At least **16GB RAM** available for Docker (8GB is NOT enough)
+- Ports available: 8080-8090, 9000-9001, 19092 (or you can change them)
 
 ## Quick Start
 
@@ -162,6 +201,73 @@ docker exec iceberg-airflow-scheduler airflow dags trigger clgraph_iceberg_pipel
 | Redpanda Console | http://localhost:8080 | - |
 | Trino | http://localhost:8085 | - |
 | Ingestion API | http://localhost:8090 | - |
+
+## Observing the Pipeline in Action
+
+Once the pipeline is running, we can watch data flow through each component in real-time.
+
+### Watch Data Flow End-to-End
+
+**1. Ingestion → Kafka (Redpanda Console)**
+- Open http://localhost:8080
+- Navigate to Topics → select `shopify.orders`
+- Watch messages arrive as webhooks are received
+- See consumer lag if Flink falls behind
+
+**2. Kafka → Raw Layer (Flink Dashboard)**
+- Open http://localhost:8083
+- View running jobs and their throughput
+- Check checkpoint status for exactly-once guarantees
+- Monitor backpressure indicators
+
+**3. Raw → Staging → Analytics (Spark Master)**
+- Open http://localhost:8084
+- Watch batch jobs execute
+- View executor metrics, shuffle read/write
+- Check completed/failed applications
+
+**4. Pipeline Orchestration (Airflow)**
+- Open http://localhost:8086 (admin/admin123)
+- View DAG: `clgraph_iceberg_pipeline`
+- See task dependencies and execution order
+- Check task logs for any failures
+
+**5. Storage (MinIO Console)**
+- Open http://localhost:9001 (admin/admin123)
+- Browse `warehouse` bucket
+- See Iceberg data files organized by table
+- Watch file count grow as data arrives
+
+### Monitoring Dashboards (Grafana)
+
+Open http://localhost:3000 (admin/admin123) for pre-built dashboards:
+
+| Dashboard | What It Shows |
+|-----------|---------------|
+| **Streaming Metrics** | Flink checkpoint duration, records processed, backpressure |
+| **Batch Metrics** | Spark job duration, shuffle I/O, executor memory |
+| **Pipeline Overview** | End-to-end latency, table row counts, job success rates |
+
+We should see numbers are increasing in the **Streaming Metrics** in real time.
+
+### Quick Health Check
+
+Run this to verify all components are working:
+
+```bash
+# Check service health
+curl -s http://localhost:9000/minio/health/live && echo "MinIO: OK"
+curl -s http://localhost:8181/v1/config | jq -r '.defaults."warehouse"' && echo "Iceberg Catalog: OK"
+curl -s http://localhost:8083/jobs/overview | jq -r '.jobs | length' | xargs -I {} echo "Flink Jobs: {} running"
+docker exec iceberg-redpanda rpk topic list | wc -l | xargs -I {} echo "Kafka Topics: {}"
+
+# Check data counts across layers
+docker exec iceberg-trino trino --execute "
+SELECT 'raw.shopify_orders' as tbl, COUNT(*) as cnt FROM iceberg.raw.shopify_orders
+UNION ALL SELECT 'staging.stg_shopify_orders', COUNT(*) FROM iceberg.staging.stg_shopify_orders
+UNION ALL SELECT 'analytics.order_summary', COUNT(*) FROM iceberg.analytics.order_summary
+"
+```
 
 ## Querying Data
 

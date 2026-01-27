@@ -1,6 +1,4 @@
-# Iceberg Incremental Demo - Architecture
-
-This document provides a detailed overview of the demo's architecture, data flow, and key design decisions.
+# Architecture: Iceberg + Redpanda + Flink + Spark + Trino + ClickHouse + Airflow + Grafana
 
 ## System Architecture
 
@@ -96,6 +94,311 @@ This document provides a detailed overview of the demo's architecture, data flow
 │  └─────────────────┘  └─────────────────┘  └─────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Infrastructure: Why Each Tool
+
+### Storage: MinIO (S3-Compatible Object Storage)
+
+**What does it do:** Stores all data files (Parquet) with S3-compatible API. Enables the "lakehouse" pattern—warehouse-like ACID transactions on cheap object storage.
+
+| Cloud | Equivalent |
+|-------|------------|
+| AWS | S3 |
+| GCP | Cloud Storage |
+| Azure | Blob Storage / ADLS Gen2 |
+
+### Table Format: Apache Iceberg
+
+**What does it do:** Adds database-like capabilities to files on object storage—ACID transactions, time travel, schema evolution. Every write creates an immutable snapshot (like git for data), so readers see consistent data even during writes. Works with any engine (Spark, Flink, Trino).
+
+| Cloud | Equivalent |
+|-------|------------|
+| AWS | Iceberg on S3 (native support), or fully managed: Athena/EMR with Iceberg |
+| GCP | Iceberg on GCS, or fully managed: BigQuery / BigLake |
+| Azure | Iceberg on ADLS, or fully managed: Fabric / Databricks Unity |
+
+### Catalog: Iceberg REST Catalog with PostgreSQL Backend
+
+**What does it do:** Tracks where tables live and their current state. Multiple engines (Spark, Flink, Trino) share this single source of truth via REST API. PostgreSQL backend handles concurrent access without locking (SQLite, the default, doesn't).
+
+| Cloud | Equivalent |
+|-------|------------|
+| AWS | AWS Glue Data Catalog |
+| GCP | BigLake Metastore / Dataplex |
+| Azure | Unity Catalog (Databricks) / Purview |
+
+### Message Queue: Redpanda (Kafka-Compatible)
+
+**What does it do:** Buffers webhook events between ingestion and processing. Decouples arrival speed from processing speed. Enables replay—if a consumer fails, it re-reads from where it left off. Kafka-compatible but simpler to operate (single binary, no ZooKeeper).
+
+| Cloud | Equivalent |
+|-------|------------|
+| AWS | Amazon MSK (Kafka) / Kinesis Data Streams |
+| GCP | Pub/Sub / Confluent Cloud |
+| Azure | Event Hubs / HDInsight Kafka |
+
+### Streaming: Apache Flink
+
+**What does it do:** Moves data from Kafka to Iceberg with sub-second latency. True event-at-a-time streaming (not micro-batches). Checkpoint-based recovery provides exactly-once delivery guarantees. Flink SQL makes pipeline definitions readable.
+
+| Cloud | Equivalent |
+|-------|------------|
+| AWS | Amazon Managed Service for Apache Flink |
+| GCP | Dataflow (Beam-based, similar purpose) |
+| Azure | Stream Analytics / HDInsight Flink |
+
+### Batch Processing: Apache Spark
+
+**What does it do:** Handles complex transformations that streaming can't—joins across sources, aggregations, entity resolution. Distributes work across multiple executors for large datasets. PySpark makes it accessible to Python-oriented data teams.
+
+| Cloud | Equivalent |
+|-------|------------|
+| AWS | EMR / Glue |
+| GCP | Dataproc |
+| Azure | Synapse Spark / HDInsight / Databricks |
+
+### Query Engine: Trino
+
+**What does it do:** Provides interactive SQL access for exploration and ad-hoc analysis. Sub-second query startup (unlike Spark which needs executor spin-up). Can federate queries across Iceberg, PostgreSQL, and other sources in a single query.
+
+| Cloud | Equivalent |
+|-------|------------|
+| AWS | Athena |
+| GCP | BigQuery (different model but similar use case) |
+| Azure | Synapse Serverless SQL |
+
+### OLAP: ClickHouse
+
+**What does it do:** Delivers millisecond query response for dashboard queries that even Trino can't achieve on large datasets. Columnar storage with extreme compression. Materialized views pre-compute aggregations automatically.
+
+| Cloud | Equivalent |
+|-------|------------|
+| AWS | Redshift / ClickHouse Cloud |
+| GCP | BigQuery |
+| Azure | Synapse Dedicated SQL / ClickHouse Cloud |
+
+### Orchestration: Apache Airflow
+
+**What does it do:** Schedules batch jobs with dependency management—staging must complete before analytics. Tracks execution history, provides logs and retry logic. DAG-based UI shows what ran, when, and whether it succeeded.
+
+| Cloud | Equivalent |
+|-------|------------|
+| AWS | MWAA (Managed Workflows for Apache Airflow) |
+| GCP | Cloud Composer |
+| Azure | Data Factory / MWAA on Azure |
+
+### Observability: Prometheus + Grafana
+
+**What does it do:** Prometheus scrapes metrics from Flink, Spark, Airflow, and MinIO. Grafana visualizes pipeline health, job durations, checkpoint status, and resource usage.
+
+| Cloud | Equivalent |
+|-------|------------|
+| AWS | CloudWatch / Amazon Managed Grafana |
+| GCP | Cloud Monitoring |
+| Azure | Azure Monitor |
+
+### Dashboards: Grafana (lightweight) or Apache Superset
+
+**What does it do:** Connects to ClickHouse and Trino to query marts tables for business dashboards. We use Grafana here as a shortcut since it's already running for observability. For a dedicated BI tool, Apache Superset offers richer visualization options, SQL Lab for exploration, and role-based access control.
+
+| Cloud | Equivalent |
+|-------|------------|
+| AWS | QuickSight / Managed Grafana |
+| GCP | Looker / Looker Studio |
+| Azure | Power BI |
+
+---
+
+## Data Layers: Why Each Layer Exists
+
+Each layer solves a specific problem. Skipping layers creates technical debt.
+
+### Raw Layer
+
+**Purpose:** Preserve the original data exactly as received—your "source of truth tape recording."
+
+**Why it exists:**
+- **Debugging**: When downstream data looks wrong, trace back to what actually arrived
+- **Reprocessing**: If transformation logic changes, replay from raw
+- **Compliance**: Some regulations require preserving original records
+- **Schema flexibility**: Raw accepts any shape; validation happens later
+
+**What belongs here:**
+- Append-only webhook payloads
+- Full JSON objects, nested structures intact
+- Metadata: `_loaded_at`, `_source_topic`, `_webhook_id`
+
+**What doesn't belong:**
+- Cleaned or transformed data
+- Aggregations
+- Business logic
+
+Never modify raw. If you need to fix data, fix it in staging.
+
+### Staging Layer
+
+**Purpose:** Clean, type, and standardize data for downstream consumption—the "contract layer" that downstream code depends on.
+
+**Why it exists:**
+- **Type safety**: Convert strings to decimals, timestamps to proper types
+- **Flattening**: Extract nested JSON into columns
+- **Null handling**: Apply default values or filter invalid records
+- **Standardization**: Normalize field names (`customer_id` not `cust_id` or `CustomerID`)
+- **Deduplication**: Handle duplicate webhook deliveries
+
+**What belongs here:**
+- One staging table per source table (1:1 mapping)
+- Typed columns with consistent naming
+- Derived fields (e.g., `is_paid` from `financial_status`)
+- Audit columns: `_raw_id`, `_staged_at`
+
+**What doesn't belong:**
+- Joins across sources (that's semantic/core layer)
+- Business metrics or aggregations
+- Denormalized views
+
+### Semantic Layer (Entity Resolution)
+
+**Purpose:** Create unified identities across multiple source systems.
+
+**Why it exists:**
+- **Unified customer profile**: The same person exists in Shopify (by email), Stripe (by customer ID), and HubSpot (by contact ID)
+- **Deduplication**: Multiple records in the same system may represent the same entity
+- **Attribution**: Connect orders to the right customer across systems
+
+**What belongs here:**
+- `entity_index`: Maps source IDs to unified entity IDs
+- `blocking_index`: Enables efficient matching (see below)
+- Match confidence scores
+- Fuzzy matching results
+
+**What doesn't belong:**
+- Business metrics
+- Transactional data
+- Anything not about identity resolution
+
+Entity resolution is hard—email matching catches 70-80%, phone adds 10%, fuzzy name matching adds 5-10% but introduces false positives. The semantic layer isolates this complexity from other layers.
+
+#### What is a Blocking Index?
+
+Entity resolution requires comparing records to find matches. The naive approach compares every record to every other record:
+
+```
+100,000 records × 100,000 records = 10 billion comparisons
+```
+
+Too slow. **Blocking** groups records by shared attributes and only compares within groups.
+
+**Example: Blocking by email domain**
+
+```
+Without blocking:              With blocking:
+
+A ↔ B ↔ C ↔ D ↔ E             Block: gmail.com
+(10 comparisons)                 A ↔ B (both @gmail.com)
+
+                               Block: yahoo.com
+                                 C ↔ D (both @yahoo.com)
+
+                               Block: company.com
+                                 E (only one, skip)
+
+                               (2 comparisons)
+```
+
+**Common blocking keys:**
+
+| Blocking Key | Groups By | Trade-off |
+|--------------|-----------|-----------|
+| Email domain | `@gmail.com`, `@company.com` | Misses matches across different email providers |
+| Phone area code | `(415)`, `(212)` | Misses matches with multiple phone numbers |
+| First 3 chars of last name | `SMI`, `JOH` | Misses typos (`JON` vs `JOH`) |
+| Normalized email (exact) | Full email | Only catches exact duplicates |
+
+**The `blocking_index` table structure:**
+
+```sql
+CREATE TABLE semantic.blocking_index (
+    blocking_key STRING,    -- e.g., 'gmail.com' or '415'
+    blocking_type STRING,   -- 'email_domain', 'phone_area', 'name_prefix'
+    source STRING,          -- 'shopify', 'stripe', 'hubspot'
+    source_id STRING,       -- Original ID in source system
+    created_at TIMESTAMP
+)
+```
+
+**How it's used:**
+
+1. Extract blocking keys from each record (email domain, phone prefix, etc.)
+2. Insert into `blocking_index`
+3. For entity resolution, query records with matching `blocking_key`
+4. Only compare records within the same block
+5. Assign unified `entity_id` to matches
+
+**Multiple blocking passes:** Production systems often run multiple passes—first block by email domain, then by phone area code, then by name prefix—to balance speed and recall. Records missed by one blocking strategy may be caught by another.
+
+### Core Layer
+
+**Purpose:** Create unified, entity-resolved views of business objects. Core answers "what is a customer?" and "what is an order?"
+
+**Why it exists:**
+- **Single source of truth**: One `customers` table, not three
+- **Consistent joins**: All downstream analytics use the same customer definition
+- **Entity-aware**: Transactions linked to unified entity IDs
+
+**What belongs here:**
+- `core.customers`: Unified customer view with best-available attributes from all sources
+- `core.orders`: Orders linked to unified customer entities
+- Cross-source aggregations at the entity level
+
+**What doesn't belong:**
+- Source-specific details (keep those in staging)
+- Time-series aggregations (that's analytics)
+- Dashboard-specific denormalization (that's marts)
+
+### Analytics Layer
+
+**Purpose:** Pre-compute metrics and aggregations. Analytics answers "how many?" and "what's the trend?"
+
+**Why it exists:**
+- **Query performance**: Aggregating millions of orders on every dashboard load is slow
+- **Consistency**: Everyone uses the same metric definitions
+- **Historical tracking**: Store daily/weekly/monthly snapshots
+
+**What belongs here:**
+- `order_summary`: Daily order counts, revenue by region/channel
+- `customer_metrics`: Lifetime value, order frequency, recency
+- `payment_metrics`: Revenue by payment method, refund rates
+
+**What doesn't belong:**
+- Raw transactional data
+- Entity resolution logic
+- Dashboard-specific formatting
+
+### Marts Layer
+
+**Purpose:** Denormalized, query-optimized views for specific use cases—the delivery layer optimized for consumption, not transformation.
+
+**Why it exists:**
+- **BI tool performance**: Dashboards need fast, simple queries
+- **Use-case specific**: Sales team needs different views than marketing
+- **Pre-joined**: No complex joins at query time
+
+**What belongs here:**
+- `customer_360`(marketing term): All customer attributes from all sources in one wide table
+- `sales_dashboard_daily`: Pre-formatted for the sales dashboard
+- Role-specific views (marketing, finance, operations)
+
+**What doesn't belong:**
+- Granular transactional data
+- Complex business logic (that should be in analytics)
+- Data that multiple marts need (put it in analytics instead)
+
+If you're writing complex SQL in a mart, the logic probably belongs in analytics.
+
+---
 
 ## Data Flow
 
@@ -417,31 +720,3 @@ All services run on a Docker bridge network (`iceberg-demo-network`). External a
 - **Spark**: Job duration, shuffle read/write, GC time
 - **Airflow**: DAG success rate, task duration, queue depth
 - **Iceberg**: Snapshot count, file count, data size
-
-## Design Decisions
-
-### Why Iceberg?
-
-1. **Time Travel**: Query historical data states
-2. **Schema Evolution**: Add/modify columns without rewrites
-3. **ACID Transactions**: Consistent reads during writes
-4. **Engine Agnostic**: Same tables for Spark, Flink, Trino
-
-### Why PostgreSQL for Catalog?
-
-SQLite (default) causes lock contention with concurrent jobs. PostgreSQL supports:
-- Multiple simultaneous readers/writers
-- Transaction isolation
-- Better connection pooling
-
-### Why Flink for Raw Layer?
-
-1. **True Streaming**: Sub-second latency from Kafka
-2. **Exactly-Once**: Checkpoint-based delivery guarantees
-3. **SQL Interface**: Easy to maintain table definitions
-
-### Why Spark for Batch Layers?
-
-1. **Mature Ecosystem**: Well-tested Iceberg integration
-2. **PySpark**: Python-friendly data transformations
-3. **Resource Efficiency**: Process large batches efficiently
