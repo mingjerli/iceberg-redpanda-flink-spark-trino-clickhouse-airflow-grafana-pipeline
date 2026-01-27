@@ -167,7 +167,7 @@ phase_1_infrastructure() {
 
     echo ""
     log_step "Creating spark-events directory in MinIO..."
-    docker exec iceberg-minio mc alias set myminio http://localhost:9000 admin admin123456 2>/dev/null || true
+    docker exec iceberg-minio mc alias set myminio http://localhost:9000 admin admin123 2>/dev/null || true
     docker exec iceberg-minio mc mb myminio/warehouse/spark-events --ignore-existing 2>/dev/null || true
 
     echo ""
@@ -214,7 +214,7 @@ phase_1_infrastructure() {
     log_info "  Airflow:          http://localhost:8086 (admin/admin123)"
     log_info "  Spark Master:     http://localhost:8084"
     log_info "  Flink:            http://localhost:8083"
-    log_info "  MinIO Console:    http://localhost:9001 (admin/admin123456)"
+    log_info "  MinIO Console:    http://localhost:9001 (admin/admin123)"
     log_info "  Redpanda Console: http://localhost:8080"
     log_info "  Trino:            http://localhost:8085"
 }
@@ -304,11 +304,11 @@ phase_3_staging() {
         --conf 'spark.sql.catalog.iceberg.io-impl=org.apache.iceberg.aws.s3.S3FileIO' \
         --conf 'spark.sql.catalog.iceberg.s3.endpoint=http://minio:9000' \
         --conf 'spark.sql.catalog.iceberg.s3.access-key-id=admin' \
-        --conf 'spark.sql.catalog.iceberg.s3.secret-access-key=admin123456' \
+        --conf 'spark.sql.catalog.iceberg.s3.secret-access-key=admin123' \
         --conf 'spark.sql.catalog.iceberg.s3.path-style-access=true' \
         --conf 'spark.hadoop.fs.s3a.endpoint=http://minio:9000' \
         --conf 'spark.hadoop.fs.s3a.access.key=admin' \
-        --conf 'spark.hadoop.fs.s3a.secret.key=admin123456' \
+        --conf 'spark.hadoop.fs.s3a.secret.key=admin123' \
         --conf 'spark.hadoop.fs.s3a.path.style.access=true' \
         /opt/spark/jobs/staging_batch.py --table all --mode full 2>&1 | tail -20
 
@@ -345,11 +345,11 @@ phase_4_semantic() {
         --conf 'spark.sql.catalog.iceberg.io-impl=org.apache.iceberg.aws.s3.S3FileIO' \
         --conf 'spark.sql.catalog.iceberg.s3.endpoint=http://minio:9000' \
         --conf 'spark.sql.catalog.iceberg.s3.access-key-id=admin' \
-        --conf 'spark.sql.catalog.iceberg.s3.secret-access-key=admin123456' \
+        --conf 'spark.sql.catalog.iceberg.s3.secret-access-key=admin123' \
         --conf 'spark.sql.catalog.iceberg.s3.path-style-access=true' \
         --conf 'spark.hadoop.fs.s3a.endpoint=http://minio:9000' \
         --conf 'spark.hadoop.fs.s3a.access.key=admin' \
-        --conf 'spark.hadoop.fs.s3a.secret.key=admin123456' \
+        --conf 'spark.hadoop.fs.s3a.secret.key=admin123' \
         --conf 'spark.hadoop.fs.s3a.path.style.access=true' \
         /opt/spark/jobs/entity_backfill.py --mode initial 2>&1 | tail -20
 
@@ -391,11 +391,11 @@ phase_5_analytics_marts() {
         --conf 'spark.sql.catalog.iceberg.io-impl=org.apache.iceberg.aws.s3.S3FileIO' \
         --conf 'spark.sql.catalog.iceberg.s3.endpoint=http://minio:9000' \
         --conf 'spark.sql.catalog.iceberg.s3.access-key-id=admin' \
-        --conf 'spark.sql.catalog.iceberg.s3.secret-access-key=admin123456' \
+        --conf 'spark.sql.catalog.iceberg.s3.secret-access-key=admin123' \
         --conf 'spark.sql.catalog.iceberg.s3.path-style-access=true' \
         --conf 'spark.hadoop.fs.s3a.endpoint=http://minio:9000' \
         --conf 'spark.hadoop.fs.s3a.access.key=admin' \
-        --conf 'spark.hadoop.fs.s3a.secret.key=admin123456' \
+        --conf 'spark.hadoop.fs.s3a.secret.key=admin123' \
         --conf 'spark.hadoop.fs.s3a.path.style.access=true' \
         /opt/spark/jobs/analytics_incremental.py --table all --mode full 2>&1 | tail -20
 
@@ -411,11 +411,11 @@ phase_5_analytics_marts() {
         --conf 'spark.sql.catalog.iceberg.io-impl=org.apache.iceberg.aws.s3.S3FileIO' \
         --conf 'spark.sql.catalog.iceberg.s3.endpoint=http://minio:9000' \
         --conf 'spark.sql.catalog.iceberg.s3.access-key-id=admin' \
-        --conf 'spark.sql.catalog.iceberg.s3.secret-access-key=admin123456' \
+        --conf 'spark.sql.catalog.iceberg.s3.secret-access-key=admin123' \
         --conf 'spark.sql.catalog.iceberg.s3.path-style-access=true' \
         --conf 'spark.hadoop.fs.s3a.endpoint=http://minio:9000' \
         --conf 'spark.hadoop.fs.s3a.access.key=admin' \
-        --conf 'spark.hadoop.fs.s3a.secret.key=admin123456' \
+        --conf 'spark.hadoop.fs.s3a.secret.key=admin123' \
         --conf 'spark.hadoop.fs.s3a.path.style.access=true' \
         /opt/spark/jobs/marts_incremental.py --table all --mode full 2>&1 | tail -20
 
@@ -522,7 +522,7 @@ print_summary() {
     echo "  1. Open Airflow UI: http://localhost:8086 (admin/admin123)"
     echo "  2. Check DAG status: clgraph_iceberg_pipeline"
     echo "  3. Query data via Trino: docker exec -it iceberg-trino trino"
-    echo "  4. View MinIO data: http://localhost:9001 (admin/admin123456)"
+    echo "  4. View MinIO data: http://localhost:9001 (admin/admin123)"
     echo ""
 }
 

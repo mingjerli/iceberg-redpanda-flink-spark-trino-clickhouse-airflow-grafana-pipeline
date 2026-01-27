@@ -145,7 +145,7 @@ start_infrastructure() {
     echo "  Airflow:          http://localhost:8086 (admin/admin123)"
     echo "  Spark Master:     http://localhost:8084"
     echo "  Flink:            http://localhost:8083"
-    echo "  MinIO Console:    http://localhost:9001 (admin/admin123456)"
+    echo "  MinIO Console:    http://localhost:9001 (admin/admin123)"
     echo "  Redpanda Console: http://localhost:8080"
     echo "  Ingestion API:    http://localhost:8090"
 }
@@ -171,7 +171,7 @@ init_iceberg_catalog() {
             's3.endpoint' = 'http://minio:9000',
             's3.path-style-access' = 'true',
             's3.access-key-id' = 'admin',
-            's3.secret-access-key' = 'admin123456'
+            's3.secret-access-key' = 'admin123'
         );
         USE CATALOG iceberg_catalog;
         CREATE DATABASE IF NOT EXISTS raw COMMENT 'Raw webhook events';

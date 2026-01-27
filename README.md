@@ -68,7 +68,7 @@ docker exec iceberg-flink-jobmanager /opt/flink/bin/sql-client.sh embedded -e "
         's3.endpoint' = 'http://minio:9000',
         's3.path-style-access' = 'true',
         's3.access-key-id' = 'admin',
-        's3.secret-access-key' = 'admin123456'
+        's3.secret-access-key' = 'admin123'
     );
     USE CATALOG iceberg_catalog;
     CREATE DATABASE IF NOT EXISTS raw;
@@ -122,7 +122,7 @@ docker exec iceberg-spark-master /opt/spark/bin/spark-submit \
     --conf 'spark.sql.catalog.iceberg.io-impl=org.apache.iceberg.aws.s3.S3FileIO' \
     --conf 'spark.sql.catalog.iceberg.s3.endpoint=http://minio:9000' \
     --conf 'spark.sql.catalog.iceberg.s3.access-key-id=admin' \
-    --conf 'spark.sql.catalog.iceberg.s3.secret-access-key=admin123456' \
+    --conf 'spark.sql.catalog.iceberg.s3.secret-access-key=admin123' \
     --conf 'spark.sql.catalog.iceberg.s3.path-style-access=true' \
     /opt/spark/jobs/staging_batch.py --table all --mode full
 
@@ -158,7 +158,7 @@ docker exec iceberg-airflow-scheduler airflow dags trigger clgraph_iceberg_pipel
 | Prometheus | http://localhost:9090 | - |
 | Spark Master | http://localhost:8084 | - |
 | Flink Dashboard | http://localhost:8083 | - |
-| MinIO Console | http://localhost:9001 | admin / admin123456 |
+| MinIO Console | http://localhost:9001 | admin / admin123 |
 | Redpanda Console | http://localhost:8080 | - |
 | Trino | http://localhost:8085 | - |
 | Ingestion API | http://localhost:8090 | - |
@@ -208,7 +208,7 @@ Create `infrastructure/.env` to customize:
 ```bash
 # MinIO
 MINIO_ROOT_USER=admin
-MINIO_ROOT_PASSWORD=admin123456
+MINIO_ROOT_PASSWORD=admin123
 
 # Airflow
 AIRFLOW_POSTGRES_USER=airflow
@@ -250,7 +250,7 @@ Ensure all Iceberg S3 configurations are passed:
 ```bash
 --conf 'spark.sql.catalog.iceberg.s3.endpoint=http://minio:9000'
 --conf 'spark.sql.catalog.iceberg.s3.access-key-id=admin'
---conf 'spark.sql.catalog.iceberg.s3.secret-access-key=admin123456'
+--conf 'spark.sql.catalog.iceberg.s3.secret-access-key=admin123'
 --conf 'spark.sql.catalog.iceberg.s3.path-style-access=true'
 ```
 

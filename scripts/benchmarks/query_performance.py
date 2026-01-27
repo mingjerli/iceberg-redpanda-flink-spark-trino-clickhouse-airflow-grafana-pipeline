@@ -249,7 +249,7 @@ def run_spark_query(query: str) -> tuple[float, int, Optional[str]]:
                 "--conf", "spark.sql.catalog.iceberg.io-impl=org.apache.iceberg.aws.s3.S3FileIO",
                 "--conf", "spark.sql.catalog.iceberg.s3.endpoint=http://minio:9000",
                 "--conf", "spark.sql.catalog.iceberg.s3.access-key-id=admin",
-                "--conf", "spark.sql.catalog.iceberg.s3.secret-access-key=admin123456",
+                "--conf", "spark.sql.catalog.iceberg.s3.secret-access-key=admin123",
                 "--conf", "spark.sql.catalog.iceberg.s3.path-style-access=true",
                 "-e", query,
             ],

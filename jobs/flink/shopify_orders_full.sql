@@ -17,7 +17,7 @@ CREATE CATALOG iceberg_catalog WITH (
     's3.endpoint' = 'http://minio:9000',
     's3.path-style-access' = 'true',
     's3.access-key-id' = 'admin',
-    's3.secret-access-key' = 'admin123456'
+    's3.secret-access-key' = 'admin123'
 );
 
 -- Use the Iceberg catalog
