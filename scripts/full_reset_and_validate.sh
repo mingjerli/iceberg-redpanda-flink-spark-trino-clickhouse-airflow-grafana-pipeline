@@ -126,6 +126,8 @@ phase_0_cleanup() {
     docker volume rm iceberg-demo-clickhouse-data 2>/dev/null || true
     docker volume rm iceberg-demo-trino-data 2>/dev/null || true
     docker volume rm iceberg-demo-airflow-postgres-data 2>/dev/null || true
+    docker volume rm iceberg-demo-prometheus-data 2>/dev/null || true
+    docker volume rm iceberg-demo-grafana-data 2>/dev/null || true
 
     log_step "Cleaning up DAG files (keeping clgraph_pipeline.py)..."
     # Keep clgraph_pipeline.py, remove others if they exist

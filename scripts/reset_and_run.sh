@@ -109,6 +109,8 @@ reset_environment() {
     docker volume rm iceberg-demo-clickhouse-data 2>/dev/null || true
     docker volume rm iceberg-demo-trino-data 2>/dev/null || true
     docker volume rm iceberg-demo-airflow-postgres-data 2>/dev/null || true
+    docker volume rm iceberg-demo-prometheus-data 2>/dev/null || true
+    docker volume rm iceberg-demo-grafana-data 2>/dev/null || true
 
     docker container prune -f 2>/dev/null || true
 
