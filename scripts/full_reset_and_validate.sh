@@ -449,26 +449,49 @@ phase_5b_airflow_dag() {
 
     cd "$INFRA_DIR"
 
-    log_step "Checking DAG availability..."
-    local dag_list=$(docker exec iceberg-airflow-scheduler airflow dags list 2>/dev/null | grep clgraph_iceberg_pipeline)
-    if [ -n "$dag_list" ]; then
-        log_success "clgraph_iceberg_pipeline DAG found"
-    else
-        log_fail "clgraph_iceberg_pipeline DAG not found"
+    local DAG_ID="clgraph_iceberg_pipeline"
+    local MAX_WAIT=120
+    local WAIT_INTERVAL=10
+
+    log_step "Waiting for DAG to be parsed by scheduler..."
+    local elapsed=0
+    while [ $elapsed -lt $MAX_WAIT ]; do
+        # Check if DAG exists in database
+        local dag_exists=$(docker exec iceberg-airflow-postgres psql -U airflow -d airflow -t -c \
+            "SELECT COUNT(*) FROM dag WHERE dag_id = '$DAG_ID';" 2>/dev/null | tr -d ' ')
+
+        if [ "${dag_exists:-0}" -ge 1 ]; then
+            log_success "$DAG_ID DAG found"
+            break
+        fi
+
+        echo -n "."
+        sleep $WAIT_INTERVAL
+        elapsed=$((elapsed + WAIT_INTERVAL))
+    done
+    echo ""
+
+    if [ $elapsed -ge $MAX_WAIT ]; then
+        log_fail "$DAG_ID DAG not found after ${MAX_WAIT}s"
         return 1
     fi
 
+    # Ensure DAG is unpaused
+    log_step "Ensuring DAG is unpaused..."
+    docker exec iceberg-airflow-postgres psql -U airflow -d airflow -c \
+        "UPDATE dag SET is_paused = false WHERE dag_id = '$DAG_ID';" 2>/dev/null || true
+
     log_step "Triggering DAG run..."
-    docker exec iceberg-airflow-scheduler airflow dags trigger clgraph_iceberg_pipeline 2>/dev/null
+    docker exec iceberg-airflow-scheduler airflow dags trigger "$DAG_ID" 2>/dev/null
 
     log_step "Waiting for DAG execution (120s)..."
     sleep 120
 
     log_step "Checking DAG task states..."
-    local latest_run=$(docker exec iceberg-airflow-scheduler airflow dags list-runs -d clgraph_iceberg_pipeline --limit 1 2>/dev/null | tail -1 | awk '{print $3}')
+    local latest_run=$(docker exec iceberg-airflow-scheduler airflow dags list-runs -d "$DAG_ID" --limit 1 2>/dev/null | tail -1 | awk '{print $3}')
 
     if [ -n "$latest_run" ]; then
-        local task_states=$(docker exec iceberg-airflow-scheduler airflow tasks states-for-dag-run clgraph_iceberg_pipeline "$latest_run" 2>/dev/null)
+        local task_states=$(docker exec iceberg-airflow-scheduler airflow tasks states-for-dag-run "$DAG_ID" "$latest_run" 2>/dev/null)
 
         local success_count=$(echo "$task_states" | grep -c "success" || echo "0")
         local failed_count=$(echo "$task_states" | grep -c "failed" || echo "0")
