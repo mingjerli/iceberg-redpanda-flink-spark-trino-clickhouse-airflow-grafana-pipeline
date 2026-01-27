@@ -28,63 +28,30 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
-  # MinIO metrics
-  - job_name: 'minio'
-    metrics_path: /minio/v2/metrics/cluster
-    scheme: http
-    static_configs:
-      - targets: ['minio:9000']
-
-  # Redpanda/Kafka metrics
+  # Redpanda/Kafka metrics (public_metrics endpoint)
   - job_name: 'redpanda'
+    metrics_path: /public_metrics
     static_configs:
       - targets: ['redpanda:9644']
 
-  # Flink metrics (JobManager)
-  - job_name: 'flink'
+  # Redpanda internal metrics
+  - job_name: 'redpanda-internal'
+    metrics_path: /metrics
     static_configs:
-      - targets: ['flink-jobmanager:9249']
+      - targets: ['redpanda:9644']
 
-  # Spark metrics (if enabled via spark.metrics.conf)
-  - job_name: 'spark'
-    metrics_path: /metrics/prometheus
+  # MinIO metrics (S3-compatible storage)
+  - job_name: 'minio'
+    metrics_path: /minio/v2/metrics/cluster
     static_configs:
-      - targets: ['spark-master:4040']
-    # Spark apps may not always be running
-    honor_labels: true
+      - targets: ['minio:9000']
 
-  # Airflow metrics (via StatsD exporter or native if configured)
+  # Airflow metrics via StatsD exporter
   - job_name: 'airflow'
     static_configs:
-      - targets: ['airflow-webserver:8080']
-    metrics_path: /health
-    # Airflow doesn't expose Prometheus metrics by default
-    # This is a placeholder - requires airflow[statsd] or custom exporter
+      - targets: ['statsd-exporter:9102']
 
-  # Trino metrics
-  - job_name: 'trino'
+  # Flink metrics (JobManager and TaskManager)
+  - job_name: 'flink'
     static_configs:
-      - targets: ['trino:8080']
-    metrics_path: /v1/info
-    # Trino JMX metrics require additional configuration
-
-  # ClickHouse metrics
-  - job_name: 'clickhouse'
-    static_configs:
-      - targets: ['clickhouse:8123']
-    metrics_path: /metrics
-    # Requires ClickHouse Prometheus endpoint enabled
-
-  # Iceberg REST catalog (basic health)
-  - job_name: 'iceberg-rest'
-    static_configs:
-      - targets: ['iceberg-rest:8181']
-    metrics_path: /v1/config
-    # This endpoint returns config, not metrics - serves as health check
-
-  # Ingestion API (if metrics endpoint added)
-  - job_name: 'ingestion-api'
-    static_configs:
-      - targets: ['ingestion-api:8090']
-    metrics_path: /metrics
-    # Requires FastAPI prometheus-fastapi-instrumentator
+      - targets: ['flink-jobmanager:9249', 'flink-taskmanager:9249']
