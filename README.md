@@ -34,7 +34,7 @@ When I first time learned about Apache Iceberg, I feel it's a great idea and wan
 - "Incremental processing patterns" Without telling us how to do watermark tables, partition-level updates, and failure recovery implemented together
 - "Entity resolution techniques" Without explaining how blocking indexes and fuzzy matching work in a real pipeline
 
-Thus, I started this repo. It's a **working reference implementation** that you can run locally, inspect, and adapt—not a simplified teaching example.
+As I tyied to make the pipeline more real, I fell into the rabbit hole of setting more and more infra and constructing more and more complex pipelines to make everything more realiastic. Thus, I started this repo so I can start with something realiastic next time. It's a **working reference implementation** that you can run locally, inspect, and adapt—not a simplified teaching example. 
 
 ## Documentation
 
@@ -248,11 +248,12 @@ Open http://localhost:3000 (admin/admin123) for pre-built dashboards:
 
 | Dashboard | What It Shows |
 |-----------|---------------|
-| **Streaming Metrics** | Flink checkpoint duration, records processed, backpressure |
-| **Batch Metrics** | Spark job duration, shuffle I/O, executor memory |
-| **Pipeline Overview** | End-to-end latency, table row counts, job success rates |
+| **Streaming Infrastructure** | Flink jobs, consumer lag, throughput, backpressure |
+| **Streaming Business** | Message counts, rates per topic, recent orders/payments |
+| **Batch Infrastructure** | Airflow DAG metrics, Spark job status |
+| **Batch Business** | Customer 360, sales summary, customer metrics from marts |
 
-We should see numbers are increasing in the **Streaming Metrics** in real time.
+We should see numbers increasing in the **Streaming Business** dashboard in real time.
 
 ### Quick Health Check
 
@@ -469,7 +470,8 @@ iceberg-incremental-demo/
 ## Related Documentation
 
 - [Architecture Documentation](./ARCHITECTURE.md)
-- [Iceberg + Incremental Design](../../plans/iceberg-incremental-design.md)
+- [Infrastructure README](./infrastructure/README.md)
+- [Runbook](./docs/RUNBOOK.md)
 
 ## API Documentation Sources
 
