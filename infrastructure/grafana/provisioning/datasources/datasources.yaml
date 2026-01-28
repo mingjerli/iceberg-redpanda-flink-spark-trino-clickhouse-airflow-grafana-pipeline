@@ -30,6 +30,6 @@ datasources:
       defaultDatabase: iceberg
       port: 9000
       server: clickhouse
-      username: default
+      username: ${CLICKHOUSE_USER}
     secureJsonData:
-      password: admin123
+      password: ${CLICKHOUSE_PASSWORD}

@@ -41,6 +41,11 @@ SPARK_CONTAINER = "iceberg-spark-master"
 
 # Spark configuration
 SPARK_MASTER = os.environ.get("SPARK_MASTER", "spark://spark-master:7077")
+
+# Get credentials from environment variables (set in docker-compose.yml)
+MINIO_ROOT_USER = os.environ.get("MINIO_ROOT_USER", "admin")
+MINIO_ROOT_PASSWORD = os.environ.get("MINIO_ROOT_PASSWORD", "admin123")
+
 SPARK_SUBMIT_BASE = (
     f"docker exec {SPARK_CONTAINER} /opt/spark/bin/spark-submit "
     f"--master {SPARK_MASTER} "
@@ -54,8 +59,8 @@ SPARK_SUBMIT_BASE = (
     "--conf spark.sql.catalog.iceberg.s3.endpoint=http://minio:9000 "
     "--conf spark.sql.catalog.iceberg.s3.path-style-access=true "
     "--conf spark.hadoop.fs.s3a.endpoint=http://minio:9000 "
-    "--conf spark.hadoop.fs.s3a.access.key=admin "
-    "--conf spark.hadoop.fs.s3a.secret.key=admin123 "
+    f"--conf spark.hadoop.fs.s3a.access.key={MINIO_ROOT_USER} "
+    f"--conf spark.hadoop.fs.s3a.secret.key={MINIO_ROOT_PASSWORD} "
     "--conf spark.hadoop.fs.s3a.path.style.access=true "
     "--conf spark.executor.memory=2g "
     "--conf spark.driver.memory=2g"

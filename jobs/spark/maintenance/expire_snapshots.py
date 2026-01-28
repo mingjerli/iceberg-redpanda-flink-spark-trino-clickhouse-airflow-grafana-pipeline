@@ -29,6 +29,7 @@ Configuration:
 
 import argparse
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
@@ -72,8 +73,8 @@ def create_spark_session() -> SparkSession:
         .config("spark.sql.catalog.iceberg.warehouse", "s3a://warehouse/") \
         .config("spark.sql.catalog.iceberg.io-impl", "org.apache.iceberg.aws.s3.S3FileIO") \
         .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000") \
-        .config("spark.hadoop.fs.s3a.access.key", "admin") \
-        .config("spark.hadoop.fs.s3a.secret.key", "admin123") \
+        .config("spark.hadoop.fs.s3a.access.key", os.environ.get("MINIO_ROOT_USER", "admin")) \
+        .config("spark.hadoop.fs.s3a.secret.key", os.environ.get("MINIO_ROOT_PASSWORD", "admin123")) \
         .config("spark.hadoop.fs.s3a.path.style.access", "true") \
         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
         .getOrCreate()

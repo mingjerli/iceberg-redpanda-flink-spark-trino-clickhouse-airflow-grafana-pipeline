@@ -16,9 +16,7 @@ CREATE CATALOG iceberg_catalog WITH (
     'uri' = 'http://iceberg-rest:8181',
     'warehouse' = 's3://warehouse/',
     's3.endpoint' = 'http://minio:9000',
-    's3.path-style-access' = 'true',
-    's3.access-key-id' = 'admin',
-    's3.secret-access-key' = 'admin123'
+    's3.path-style-access' = 'true'
 );
 
 -- Use the Iceberg catalog by default

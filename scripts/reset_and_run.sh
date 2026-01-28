@@ -36,6 +36,26 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 INFRA_DIR="$PROJECT_DIR/infrastructure"
+ENV_FILE="$INFRA_DIR/.env"
+ENV_EXAMPLE="$INFRA_DIR/.env.example"
+
+# Check for .env file and copy from .env.example if it doesn't exist
+if [ ! -f "$ENV_FILE" ]; then
+    if [ -f "$ENV_EXAMPLE" ]; then
+        echo "Creating .env file from .env.example..."
+        cp "$ENV_EXAMPLE" "$ENV_FILE"
+        echo "Created $ENV_FILE - please review and customize if needed."
+    else
+        echo "ERROR: Neither $ENV_FILE nor $ENV_EXAMPLE found!"
+        echo "Please create $ENV_FILE with required configuration."
+        exit 1
+    fi
+fi
+
+# Source environment variables from .env file
+set -a  # automatically export all variables
+source "$ENV_FILE"
+set +a
 
 # Data generation settings
 SHOPIFY_CUSTOMERS=${SHOPIFY_CUSTOMERS:-50}
@@ -200,6 +220,14 @@ start_infrastructure() {
 
     cd "$INFRA_DIR"
 
+    # Substitute credential placeholders in config templates
+    log_step "Generating config files from templates..."
+    sed -e "s/__MINIO_USER__/$MINIO_ROOT_USER/g" \
+        -e "s/__MINIO_PASSWORD__/$MINIO_ROOT_PASSWORD/g" \
+        trino/catalog/iceberg.properties > /tmp/trino_iceberg.properties
+    cp /tmp/trino_iceberg.properties trino/catalog/iceberg.properties
+    rm -f /tmp/trino_iceberg.properties
+
     if [ "$SKIP_DATAGEN" = true ]; then
         log_step "Building and starting services (without datagen)..."
         docker-compose up -d --build 2>&1 | grep -E "Created|Started|Running" || true
@@ -222,7 +250,7 @@ start_infrastructure() {
 
     echo ""
     log_step "Creating spark-events directory in MinIO..."
-    docker exec iceberg-minio mc alias set myminio http://localhost:9000 admin admin123 2>/dev/null || true
+    docker exec iceberg-minio mc alias set myminio http://localhost:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" 2>/dev/null || true
     docker exec iceberg-minio mc mb myminio/warehouse/spark-events --ignore-existing 2>/dev/null || true
 
     log_success "All services running"
@@ -270,10 +298,10 @@ start_infrastructure() {
 
     echo ""
     log_info "Service URLs:"
-    log_info "  Airflow:          http://localhost:8086 (admin/admin123)"
+    log_info "  Airflow:          http://localhost:8086 ($AIRFLOW_ADMIN_USER/$AIRFLOW_ADMIN_PASSWORD)"
     log_info "  Spark Master:     http://localhost:8084"
     log_info "  Flink:            http://localhost:8083"
-    log_info "  MinIO Console:    http://localhost:9001 (admin/admin123)"
+    log_info "  MinIO Console:    http://localhost:9001 ($MINIO_ROOT_USER/$MINIO_ROOT_PASSWORD)"
     log_info "  Redpanda Console: http://localhost:8080"
     log_info "  Trino:            http://localhost:8085"
     log_info "  Ingestion API:    http://localhost:8090"
@@ -298,8 +326,8 @@ init_iceberg_catalog() {
             'io-impl' = 'org.apache.iceberg.aws.s3.S3FileIO',
             's3.endpoint' = 'http://minio:9000',
             's3.path-style-access' = 'true',
-            's3.access-key-id' = 'admin',
-            's3.secret-access-key' = 'admin123'
+            's3.access-key-id' = '$MINIO_ROOT_USER',
+            's3.secret-access-key' = '$MINIO_ROOT_PASSWORD'
         );
         USE CATALOG iceberg_catalog;
         CREATE DATABASE IF NOT EXISTS raw COMMENT 'Raw webhook events';
@@ -439,8 +467,8 @@ run_batch_pipeline() {
         --conf spark.sql.catalog.iceberg.s3.endpoint=http://minio:9000 \
         --conf spark.sql.catalog.iceberg.s3.path-style-access=true \
         --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000 \
-        --conf spark.hadoop.fs.s3a.access.key=admin \
-        --conf spark.hadoop.fs.s3a.secret.key=admin123 \
+        --conf spark.hadoop.fs.s3a.access.key=$MINIO_ROOT_USER \
+        --conf spark.hadoop.fs.s3a.secret.key=$MINIO_ROOT_PASSWORD \
         --conf spark.hadoop.fs.s3a.path.style.access=true \
         --conf spark.executor.memory=2g \
         --conf spark.driver.memory=2g"
@@ -457,8 +485,8 @@ run_batch_pipeline() {
         --conf spark.sql.catalog.iceberg.s3.endpoint=http://minio:9000 \
         --conf spark.sql.catalog.iceberg.s3.path-style-access=true \
         --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000 \
-        --conf spark.hadoop.fs.s3a.access.key=admin \
-        --conf spark.hadoop.fs.s3a.secret.key=admin123 \
+        --conf spark.hadoop.fs.s3a.access.key=$MINIO_ROOT_USER \
+        --conf spark.hadoop.fs.s3a.secret.key=$MINIO_ROOT_PASSWORD \
         --conf spark.hadoop.fs.s3a.path.style.access=true \
         -e "
             CREATE DATABASE IF NOT EXISTS iceberg.metadata;
@@ -560,7 +588,11 @@ setup_clickhouse_views() {
     cd "$INFRA_DIR"
 
     log_step "Creating ClickHouse views for Iceberg tables..."
-    docker exec -i iceberg-clickhouse clickhouse-client --multiquery < clickhouse/iceberg_setup.sql 2>&1 | tail -3 || {
+    # Substitute environment variables in the SQL template
+    sed -e "s/__MINIO_USER__/$MINIO_ROOT_USER/g" \
+        -e "s/__MINIO_PASSWORD__/$MINIO_ROOT_PASSWORD/g" \
+        clickhouse/iceberg_setup.sql | \
+        docker exec -i iceberg-clickhouse clickhouse-client --multiquery 2>&1 | tail -3 || {
         log_warning "Some ClickHouse views may have failed"
     }
 
@@ -585,32 +617,69 @@ validate_tables() {
     log_step "Checking table row counts via Trino..."
     sleep 5
 
-    docker exec iceberg-trino trino --execute "
-        SELECT 'raw.shopify_orders' as tbl, COUNT(*) as cnt FROM iceberg.raw.shopify_orders
-        UNION ALL SELECT 'raw.shopify_customers', COUNT(*) FROM iceberg.raw.shopify_customers
-        UNION ALL SELECT 'raw.stripe_charges', COUNT(*) FROM iceberg.raw.stripe_charges
-        UNION ALL SELECT 'raw.stripe_customers', COUNT(*) FROM iceberg.raw.stripe_customers
-        UNION ALL SELECT 'raw.hubspot_contacts', COUNT(*) FROM iceberg.raw.hubspot_contacts
-        UNION ALL SELECT 'staging.stg_shopify_orders', COUNT(*) FROM iceberg.staging.stg_shopify_orders
-        UNION ALL SELECT 'staging.stg_shopify_customers', COUNT(*) FROM iceberg.staging.stg_shopify_customers
-        UNION ALL SELECT 'staging.stg_stripe_charges', COUNT(*) FROM iceberg.staging.stg_stripe_charges
-        UNION ALL SELECT 'staging.stg_stripe_customers', COUNT(*) FROM iceberg.staging.stg_stripe_customers
-        UNION ALL SELECT 'staging.stg_hubspot_contacts', COUNT(*) FROM iceberg.staging.stg_hubspot_contacts
-        UNION ALL SELECT 'semantic.entity_index', COUNT(*) FROM iceberg.semantic.entity_index
-        UNION ALL SELECT 'core.customers', COUNT(*) FROM iceberg.core.customers
-        UNION ALL SELECT 'core.orders', COUNT(*) FROM iceberg.core.orders
-        UNION ALL SELECT 'analytics.customer_metrics', COUNT(*) FROM iceberg.analytics.customer_metrics
-        UNION ALL SELECT 'analytics.order_summary', COUNT(*) FROM iceberg.analytics.order_summary
-        UNION ALL SELECT 'analytics.payment_metrics', COUNT(*) FROM iceberg.analytics.payment_metrics
-        UNION ALL SELECT 'marts.customer_360', COUNT(*) FROM iceberg.marts.customer_360
-        ORDER BY tbl
-    " 2>/dev/null || {
-        log_warning "Could not validate via Trino - checking catalog instead"
-        docker exec iceberg-airflow-postgres psql -U airflow -d iceberg_catalog -c \
-            "SELECT table_namespace, table_name FROM iceberg_tables ORDER BY table_namespace, table_name;" 2>/dev/null
-    }
+    # Define all tables to validate
+    local tables=(
+        "raw.shopify_orders"
+        "raw.shopify_customers"
+        "raw.stripe_charges"
+        "raw.stripe_customers"
+        "raw.hubspot_contacts"
+        "staging.stg_shopify_orders"
+        "staging.stg_shopify_customers"
+        "staging.stg_stripe_charges"
+        "staging.stg_stripe_customers"
+        "staging.stg_hubspot_contacts"
+        "semantic.entity_index"
+        "semantic.blocking_index"
+        "core.customers"
+        "core.orders"
+        "analytics.customer_metrics"
+        "analytics.order_summary"
+        "analytics.payment_metrics"
+        "marts.customer_360"
+        "marts.sales_dashboard_daily"
+        "marts.executive_summary"
+    )
 
-    log_success "Validation complete"
+    local all_passed=true
+    local total_tables=${#tables[@]}
+    local validated=0
+    local failed=0
+
+    printf "\n  %-40s %s\n" "TABLE" "ROW COUNT"
+    printf "  %-40s %s\n" "----------------------------------------" "----------"
+
+    for table in "${tables[@]}"; do
+        local count
+        count=$(docker exec iceberg-trino trino --execute \
+            "SELECT COUNT(*) FROM iceberg.${table}" 2>/dev/null | tr -d '"')
+
+        if [ $? -eq 0 ] && [ -n "$count" ]; then
+            if [ "$count" -gt 0 ] 2>/dev/null; then
+                printf "  %-40s %s\n" "$table" "$count ✓"
+                validated=$((validated + 1))
+            else
+                printf "  %-40s %s\n" "$table" "0 (empty)"
+                validated=$((validated + 1))
+            fi
+        else
+            printf "  %-40s %s\n" "$table" "FAILED ✗"
+            failed=$((failed + 1))
+            all_passed=false
+        fi
+    done
+
+    echo ""
+    log_info "Validated: $validated/$total_tables tables"
+    if [ $failed -gt 0 ]; then
+        log_warning "Failed to query $failed table(s)"
+    fi
+
+    if [ "$all_passed" = true ]; then
+        log_success "All tables validated via Trino"
+    else
+        log_warning "Some tables could not be validated"
+    fi
 }
 
 # =============================================================================
@@ -721,10 +790,10 @@ print_summary() {
     echo ""
     echo "  Next steps:"
     echo "  ───────────────────────────────────────────────────────────"
-    echo "  1. Open Airflow: http://localhost:8086 (admin/admin123)"
+    echo "  1. Open Airflow: http://localhost:8086 ($AIRFLOW_ADMIN_USER/$AIRFLOW_ADMIN_PASSWORD)"
     echo "  2. Watch DAG: iceberg_pipeline"
     echo "  3. Query data: docker exec -it iceberg-trino trino"
-    echo "  4. View MinIO data: http://localhost:9001 (admin/admin123)"
+    echo "  4. View MinIO data: http://localhost:9001 ($MINIO_ROOT_USER/$MINIO_ROOT_PASSWORD)"
     echo ""
     echo "  Troubleshooting:"
     echo "  ───────────────────────────────────────────────────────────"

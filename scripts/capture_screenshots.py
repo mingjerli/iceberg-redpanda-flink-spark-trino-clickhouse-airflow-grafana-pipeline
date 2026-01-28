@@ -9,18 +9,27 @@ Screenshots are saved to docs/screenshots/
 """
 
 import asyncio
+import os
 from pathlib import Path
 from playwright.async_api import async_playwright
 
 # Output directory
 SCREENSHOT_DIR = Path(__file__).parent.parent / "docs" / "screenshots"
 
+# Get credentials from environment variables
+AIRFLOW_ADMIN_USER = os.environ.get("AIRFLOW_ADMIN_USER", "admin")
+AIRFLOW_ADMIN_PASSWORD = os.environ.get("AIRFLOW_ADMIN_PASSWORD", "admin123")
+GRAFANA_ADMIN_USER = os.environ.get("GRAFANA_ADMIN_USER", "admin")
+GRAFANA_ADMIN_PASSWORD = os.environ.get("GRAFANA_ADMIN_PASSWORD", "admin123")
+MINIO_ROOT_USER = os.environ.get("MINIO_ROOT_USER", "admin")
+MINIO_ROOT_PASSWORD = os.environ.get("MINIO_ROOT_PASSWORD", "admin123")
+
 # UI configurations: (name, url, auth, wait_for, actions)
 UIS = [
     {
         "name": "airflow_dag_graph",
         "url": "http://localhost:8086/dags/iceberg_pipeline/graph",
-        "auth": ("admin", "admin123"),
+        "auth": (AIRFLOW_ADMIN_USER, AIRFLOW_ADMIN_PASSWORD),
         "wait_for": "canvas",  # DAG graph canvas
         "width": 1400,
         "height": 900,
@@ -28,7 +37,7 @@ UIS = [
     {
         "name": "airflow_dag_list",
         "url": "http://localhost:8086/dags",
-        "auth": ("admin", "admin123"),
+        "auth": (AIRFLOW_ADMIN_USER, AIRFLOW_ADMIN_PASSWORD),
         "wait_for": "table",
         "width": 1400,
         "height": 700,
@@ -36,7 +45,7 @@ UIS = [
     {
         "name": "grafana_dashboard",
         "url": "http://localhost:3000/dashboards",
-        "auth": ("admin", "admin123"),
+        "auth": (GRAFANA_ADMIN_USER, GRAFANA_ADMIN_PASSWORD),
         "wait_for": "text=Dashboards",
         "width": 1400,
         "height": 800,
@@ -68,7 +77,7 @@ UIS = [
     {
         "name": "minio_console",
         "url": "http://localhost:9001/browser/warehouse",
-        "auth": ("admin", "admin123"),
+        "auth": (MINIO_ROOT_USER, MINIO_ROOT_PASSWORD),
         "wait_for": "text=warehouse",
         "width": 1200,
         "height": 800,
