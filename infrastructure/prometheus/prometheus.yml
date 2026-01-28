@@ -55,3 +55,9 @@ scrape_configs:
   - job_name: 'flink'
     static_configs:
       - targets: ['flink-jobmanager:9249', 'flink-taskmanager:9249']
+
+  # FastAPI Ingestion API metrics
+  - job_name: 'ingestion-api'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['ingestion-api:8000']

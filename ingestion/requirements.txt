@@ -16,6 +16,9 @@ pydantic-settings>=2.0.0,<3.0.0
 # Utilities
 python-multipart>=0.0.6,<1.0.0  # For form data
 
+# Monitoring
+prometheus-fastapi-instrumentator>=6.0.0,<7.0.0
+
 # Optional: For testing
 httpx>=0.26.0,<1.0.0
 pytest>=8.0.0,<9.0.0

@@ -12,6 +12,7 @@ from typing import Any, Dict
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from .config import get_settings
 from .producers.redpanda import get_producer, shutdown_producer
@@ -79,6 +80,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add Prometheus metrics instrumentation
+# Exposes /metrics endpoint for Prometheus scraping
+Instrumentator().instrument(app).expose(app)
 
 
 # Register webhook routers
