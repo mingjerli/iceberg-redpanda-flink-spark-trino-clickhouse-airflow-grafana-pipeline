@@ -65,12 +65,12 @@ This demo simulates a modern data platform that:
 
 ## Quick Start
 
-### Option 1: Full Reset and Validation (Recommended)
+### Option 1: Automated Setup (Recommended)
 
-Run the complete setup with validation:
+Run the complete setup:
 
 ```bash
-./scripts/full_reset_and_validate.sh
+./scripts/reset_and_run.sh
 ```
 
 This script will:
@@ -79,8 +79,14 @@ This script will:
 3. Submit Flink streaming jobs to write raw data to Iceberg
 4. Post mock data to webhook endpoints
 5. Run Spark batch jobs for all data layers (staging → semantic → analytics → marts)
-6. Trigger and validate the Airflow DAG
-7. Display a validation summary
+6. Setup ClickHouse views for Grafana dashboards
+7. Trigger the Airflow DAG
+
+**Options:**
+- `--validate` - Run with detailed validation and test counts
+- `--no-reset` - Skip reset, just run the pipeline
+- `--reset-only` - Only reset, don't run the pipeline
+- `--no-datagen` - Don't start continuous data generation service
 
 ### Option 2: Step-by-Step Setup
 
@@ -423,7 +429,7 @@ docker exec iceberg-airflow-postgres psql -U airflow -d iceberg_catalog -c \
 ### Reset Everything
 
 ```bash
-./scripts/full_reset_and_validate.sh
+./scripts/reset_and_run.sh
 ```
 
 Or manually:
@@ -461,9 +467,9 @@ iceberg-incremental-demo/
 │   ├── 04_analytics/
 │   └── 05_marts/
 ├── scripts/                     # Utility scripts
-│   ├── full_reset_and_validate.sh
-│   ├── reset_and_run.sh
-│   └── post_mock_data.py
+│   ├── reset_and_run.sh         # Main setup script (--help for options)
+│   ├── validate_tables.sh       # Quick table validation
+│   └── post_mock_data.py        # Mock data generator
 └── schemas/                     # API JSON schemas
 ```
 

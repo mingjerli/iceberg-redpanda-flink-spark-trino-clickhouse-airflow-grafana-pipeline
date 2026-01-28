@@ -338,7 +338,13 @@ docker exec iceberg-airflow-postgres pg_dump -U airflow airflow > airflow_backup
 Complete reset with data loss:
 
 ```bash
-./scripts/full_reset_and_validate.sh
+./scripts/reset_and_run.sh
+```
+
+For detailed validation during reset:
+
+```bash
+./scripts/reset_and_run.sh --validate
 ```
 
 ### Restore from Backup
