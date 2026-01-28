@@ -40,6 +40,7 @@ Thus, I started this repo. It's a **working reference implementation** that you 
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | System design, infrastructure rationale, data layer philosophy |
 | [infrastructure/README.md](./infrastructure/README.md) | Service-by-service guide with tool selection rationale |
 | [docs/RUNBOOK.md](./docs/RUNBOOK.md) | Operational procedures and troubleshooting |
+| [docs/architecture.excalidraw](./docs/architecture.excalidraw) | Interactive architecture diagram (open with Excalidraw) |
 
 ## Overview
 
