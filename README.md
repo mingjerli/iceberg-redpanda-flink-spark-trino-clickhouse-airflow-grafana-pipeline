@@ -53,6 +53,10 @@ This demo simulates a modern data platform that:
 - Orchestrates pipelines with **Apache Airflow**
 - Supports queries from **Trino**, **Spark**, and **ClickHouse**
 
+### Architecture Diagram
+
+![Architecture Diagram](docs/architecture.png)
+
 ## Prerequisites
 
 - **Docker** and **Docker Compose**
