@@ -56,7 +56,7 @@ COPY spark-defaults.conf ${SPARK_HOME}/conf/spark-defaults.conf
 
 # Environment variables
 ENV AWS_ACCESS_KEY_ID=admin
-ENV AWS_SECRET_ACCESS_KEY=admin123456
+ENV AWS_SECRET_ACCESS_KEY=admin123
 ENV AWS_REGION=us-east-1
 
 # Switch back to spark user

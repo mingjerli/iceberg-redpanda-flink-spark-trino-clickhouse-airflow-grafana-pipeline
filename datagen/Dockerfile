@@ -16,6 +16,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Default command - generate data
-ENTRYPOINT ["python", "generator.py"]
-CMD ["--help"]
+# Default command - run webhook simulator in continuous mode
+ENTRYPOINT ["python", "simulate_webhooks.py"]
+CMD ["--source", "all", "--continuous", "--interval", "2"]

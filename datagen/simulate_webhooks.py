@@ -72,6 +72,7 @@ class WebhookSimulator:
                 "last_name": self.shopify.fake.last_name(),
                 "phone": self.shopify.fake.phone_number(),
                 "company": self.shopify.fake.company() if random.random() > 0.3 else None,
+                "created_at": self.shopify.fake.date_time_between(start_date="-2y", end_date="-1d"),
             }
             self._customers.append(customer)
 

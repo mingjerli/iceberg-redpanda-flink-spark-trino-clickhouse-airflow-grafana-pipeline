@@ -120,7 +120,7 @@ SELECT
     `default_address`,
     `addresses`,
     `accepts_marketing`,
-    TO_TIMESTAMP(`accepts_marketing_updated_at`),
+    TO_TIMESTAMP(REPLACE(REPLACE(`accepts_marketing_updated_at`, 'T', ' '), 'Z', '')),
     `marketing_opt_in_level`,
     `currency`,
     CAST(`total_spent` AS DECIMAL(18, 2)),
@@ -131,9 +131,9 @@ SELECT
     `tax_exemptions`,
     `note`,
     `tags`,
-    TO_TIMESTAMP(`created_at`),
-    TO_TIMESTAMP(`updated_at`),
-    TO_TIMESTAMP(`_webhook_received_at`),
+    TO_TIMESTAMP(REPLACE(REPLACE(`created_at`, 'T', ' '), 'Z', '')),
+    TO_TIMESTAMP(REPLACE(REPLACE(`updated_at`, 'T', ' '), 'Z', '')),
+    TO_TIMESTAMP(REPLACE(REPLACE(`_webhook_received_at`, 'T', ' '), 'Z', '')),
     `_webhook_topic`,
     CURRENT_TIMESTAMP as `_loaded_at`
 FROM shopify_customers_source;

@@ -19,12 +19,12 @@ jobmanager.memory.process.size: 1600m
 taskmanager.bind-host: 0.0.0.0
 taskmanager.host: flink-taskmanager
 taskmanager.memory.process.size: 2048m
-taskmanager.numberOfTaskSlots: 8
+taskmanager.numberOfTaskSlots: 12
 
 # -----------------------------------------------------------------------------
 # Parallelism Configuration
 # -----------------------------------------------------------------------------
-parallelism.default: 2
+parallelism.default: 1
 
 # -----------------------------------------------------------------------------
 # Checkpointing Configuration

@@ -96,7 +96,7 @@ USER flink
 
 # Environment variables for S3/MinIO access (these are overridden at runtime)
 ENV AWS_ACCESS_KEY_ID=admin
-ENV AWS_SECRET_ACCESS_KEY=admin123456
+ENV AWS_SECRET_ACCESS_KEY=admin123
 ENV AWS_REGION=us-east-1
 
 # Default command

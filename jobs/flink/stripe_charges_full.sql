@@ -198,7 +198,7 @@ SELECT
     `metadata`,
     -- Convert Unix timestamp (seconds) to TIMESTAMP
     TO_TIMESTAMP_LTZ(`created`, 0),
-    TO_TIMESTAMP(`_webhook_received_at`),
+    TO_TIMESTAMP(REPLACE(REPLACE(`_webhook_received_at`, 'T', ' '), 'Z', '')),
     `_webhook_event_id`,
     CURRENT_TIMESTAMP as `_loaded_at`
 FROM stripe_charges_source;

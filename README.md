@@ -4,6 +4,10 @@ This is a production-style(but not production-ready) data platform combining rea
 
 **DISCLOSURE:Majority of the content are written with Claude(with human guided) ... as you can expected.**
 
+## Architecture Diagram
+
+![Architecture Diagram](docs/architecture.svg)
+
 ## Who This Project Is For
 
 This repository is **not a beginner tutorial**. It assumes you already understand:
@@ -40,7 +44,6 @@ Thus, I started this repo. It's a **working reference implementation** that you 
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | System design, infrastructure rationale, data layer philosophy |
 | [infrastructure/README.md](./infrastructure/README.md) | Service-by-service guide with tool selection rationale |
 | [docs/RUNBOOK.md](./docs/RUNBOOK.md) | Operational procedures and troubleshooting |
-| [docs/architecture.excalidraw](./docs/architecture.excalidraw) | Interactive architecture diagram (open with Excalidraw) |
 
 ## Overview
 
@@ -52,10 +55,6 @@ This demo simulates a modern data platform that:
 - Implements **entity resolution** to unify customers across sources
 - Orchestrates pipelines with **Apache Airflow**
 - Supports queries from **Trino**, **Spark**, and **ClickHouse**
-
-### Architecture Diagram
-
-![Architecture Diagram](docs/architecture.png)
 
 ## Prerequisites
 

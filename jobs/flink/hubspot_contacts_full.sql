@@ -141,9 +141,9 @@ SELECT
     `hs_analytics_num_page_views`,
     `hs_analytics_num_visits`,
     `hs_email_optout`,
-    TO_TIMESTAMP(`createdate`),
-    TO_TIMESTAMP(`lastmodifieddate`),
-    TO_TIMESTAMP(`_webhook_received_at`),
+    TO_TIMESTAMP(REPLACE(REPLACE(`createdate`, 'T', ' '), 'Z', '')),
+    TO_TIMESTAMP(REPLACE(REPLACE(`lastmodifieddate`, 'T', ' '), 'Z', '')),
+    TO_TIMESTAMP(REPLACE(REPLACE(`_webhook_received_at`, 'T', ' '), 'Z', '')),
     `_webhook_subscription_type`,
     CURRENT_TIMESTAMP as `_loaded_at`
 FROM hubspot_contacts_source;
