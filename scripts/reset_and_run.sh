@@ -258,8 +258,7 @@ submit_flink_jobs() {
     echo ""
 
     # Submit each ingestion job
-    # Note: stripe_customers is not included because staging_batch.py doesn't process it
-    for job in shopify_orders shopify_customers stripe_charges hubspot_contacts; do
+    for job in shopify_orders shopify_customers stripe_charges stripe_customers hubspot_contacts; do
         job_file="/opt/flink/jobs/${job}_full.sql"
         echo "  Submitting: $job..."
         docker exec iceberg-flink-jobmanager /opt/flink/bin/sql-client.sh embedded \
@@ -359,7 +358,7 @@ run_batch_pipeline() {
 
     echo ""
     echo "Running staging batch jobs..."
-    for table in shopify_orders shopify_customers stripe_charges hubspot_contacts; do
+    for table in shopify_orders shopify_customers stripe_charges stripe_customers hubspot_contacts; do
         echo "  Processing: $table"
         $SPARK_SUBMIT /opt/spark/jobs/staging_batch.py --table $table --mode full 2>&1 | tail -5 || {
             log_warning "Failed to process $table"

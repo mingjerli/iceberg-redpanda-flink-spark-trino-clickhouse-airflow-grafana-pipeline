@@ -39,6 +39,7 @@
 │  │  • shopify_orders_full.sql    → raw.shopify_orders                      │    │
 │  │  • shopify_customers_full.sql → raw.shopify_customers                   │    │
 │  │  • stripe_charges_full.sql    → raw.stripe_charges                      │    │
+│  │  • stripe_customers_full.sql  → raw.stripe_customers                    │    │
 │  │  • hubspot_contacts_full.sql  → raw.hubspot_contacts                    │    │
 │  └───────────────────────────────────┬─────────────────────────────────────┘    │
 └──────────────────────────────────────┼──────────────────────────────────────────┘
@@ -426,6 +427,7 @@ Redpanda Topics → Flink SQL → Iceberg Raw Tables
 - `raw.shopify_orders` - Order events with line items, addresses
 - `raw.shopify_customers` - Customer creation/update events
 - `raw.stripe_charges` - Payment charge events
+- `raw.stripe_customers` - Stripe customer events
 - `raw.hubspot_contacts` - Contact events with properties
 
 ### Phase 3: Staging Layer (Batch)
@@ -443,6 +445,7 @@ Iceberg Raw → Spark (staging_batch.py) → Iceberg Staging
 - `staging.stg_shopify_orders` - Cleaned orders with derived fields
 - `staging.stg_shopify_customers` - Normalized customer records
 - `staging.stg_stripe_charges` - Standardized payment data
+- `staging.stg_stripe_customers` - Normalized Stripe customer records
 - `staging.stg_hubspot_contacts` - Flattened contact properties
 
 ### Phase 4: Semantic Layer (Batch)

@@ -38,6 +38,11 @@ SELECT *
 FROM iceberg('http://minio:9000/warehouse/raw/stripe_charges/',
              'admin', 'admin123');
 
+CREATE OR REPLACE VIEW iceberg.raw_stripe_customers AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/raw/stripe_customers/',
+             'admin', 'admin123');
+
 CREATE OR REPLACE VIEW iceberg.raw_hubspot_contacts AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/raw/hubspot_contacts/',
@@ -60,6 +65,11 @@ FROM iceberg('http://minio:9000/warehouse/staging/stg_shopify_customers/',
 CREATE OR REPLACE VIEW iceberg.stg_stripe_charges AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/staging/stg_stripe_charges/',
+             'admin', 'admin123');
+
+CREATE OR REPLACE VIEW iceberg.stg_stripe_customers AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/staging/stg_stripe_customers/',
              'admin', 'admin123');
 
 CREATE OR REPLACE VIEW iceberg.stg_hubspot_contacts AS

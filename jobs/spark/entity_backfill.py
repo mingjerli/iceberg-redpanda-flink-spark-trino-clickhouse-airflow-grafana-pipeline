@@ -204,7 +204,28 @@ def get_all_staging_customers(
         WHERE 1=1 {date_filter}
     """)
 
-    all_customers = shopify.union(hubspot).filter(
+    # Stripe customers
+    stripe = spark.sql(f"""
+        SELECT
+            'stripe_customers' AS source,
+            customer_id AS source_id,
+            email,
+            first_name,
+            last_name,
+            full_name,
+            phone,
+            address_line1 AS address,
+            city,
+            state,
+            postal_code AS zip,
+            country,
+            created_at,
+            _staged_at
+        FROM iceberg.staging.stg_stripe_customers
+        WHERE 1=1 {date_filter}
+    """)
+
+    all_customers = shopify.union(hubspot).union(stripe).filter(
         # Filter out records without a valid source_id
         col("source_id").isNotNull()
     )
@@ -413,10 +434,10 @@ def rebuild_blocking_index(spark: SparkSession, dry_run: bool):
             ei.unified_id,
             ei.source,
             ei.source_id,
-            LOWER(TRIM(COALESCE(hc.email, sc.email))) AS normalized_email,
-            REGEXP_REPLACE(COALESCE(hc.phone, hc.mobile_phone, sc.phone), '[^0-9+]', '') AS normalized_phone,
-            COALESCE(hc.last_name, sc.last_name) AS last_name,
-            COALESCE(hc.zip, sc.zip) AS zip
+            LOWER(TRIM(COALESCE(hc.email, sc.email, stc.email))) AS normalized_email,
+            REGEXP_REPLACE(COALESCE(hc.phone, hc.mobile_phone, sc.phone, stc.phone), '[^0-9+]', '') AS normalized_phone,
+            COALESCE(hc.last_name, sc.last_name, stc.last_name) AS last_name,
+            COALESCE(hc.zip, sc.zip, stc.postal_code) AS zip
         FROM iceberg.semantic.entity_index ei
         LEFT JOIN iceberg.staging.stg_shopify_customers sc
             ON ei.source = 'shopify_customers'
@@ -424,6 +445,9 @@ def rebuild_blocking_index(spark: SparkSession, dry_run: bool):
         LEFT JOIN iceberg.staging.stg_hubspot_contacts hc
             ON ei.source = 'hubspot_contacts'
             AND ei.source_id = hc.contact_id
+        LEFT JOIN iceberg.staging.stg_stripe_customers stc
+            ON ei.source = 'stripe_customers'
+            AND ei.source_id = stc.customer_id
         WHERE ei.entity_type = 'customer'
           AND ei.linked_to_unified_id IS NULL
     """)

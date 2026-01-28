@@ -230,7 +230,7 @@ phase_2_raw_layer() {
     cd "$PROJECT_DIR"
 
     log_step "Submitting Flink streaming jobs..."
-    for job in shopify_orders shopify_customers stripe_charges hubspot_contacts; do
+    for job in shopify_orders shopify_customers stripe_charges stripe_customers hubspot_contacts; do
         log_info "  Submitting: ${job}_full.sql"
         docker exec iceberg-flink-jobmanager /opt/flink/bin/sql-client.sh embedded \
             -f "/opt/flink/jobs/${job}_full.sql" 2>&1 | tail -5 &
@@ -267,7 +267,7 @@ phase_2_raw_layer() {
     log_step "Validating Phase 2..."
 
     # Check raw tables exist
-    for table in shopify_orders shopify_customers stripe_charges hubspot_contacts; do
+    for table in shopify_orders shopify_customers stripe_charges stripe_customers hubspot_contacts; do
         if check_table_exists "raw" "$table"; then
             log_success "Raw table exists: raw.$table"
         else

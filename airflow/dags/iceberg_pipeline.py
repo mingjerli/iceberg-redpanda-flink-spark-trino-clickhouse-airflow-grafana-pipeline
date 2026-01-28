@@ -99,6 +99,10 @@ with DAG(
         task_id="stg_stripe_charges",
         bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/staging_batch.py --table stripe_charges --mode incremental",
     )
+    stg_stripe_customers = BashOperator(
+        task_id="stg_stripe_customers",
+        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/staging_batch.py --table stripe_customers --mode incremental",
+    )
     stg_hubspot_contacts = BashOperator(
         task_id="stg_hubspot_contacts",
         bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/staging_batch.py --table hubspot_contacts --mode incremental",
@@ -165,14 +169,14 @@ with DAG(
     # -------------------------------------------------------------------------
 
     # Staging: parallel from start
-    start >> [stg_shopify_orders, stg_shopify_customers, stg_stripe_charges, stg_hubspot_contacts]
+    start >> [stg_shopify_orders, stg_shopify_customers, stg_stripe_charges, stg_stripe_customers, stg_hubspot_contacts]
 
-    # Semantic: needs customer data
-    [stg_shopify_customers, stg_hubspot_contacts] >> entity_index
+    # Semantic: needs customer data from all sources
+    [stg_shopify_customers, stg_stripe_customers, stg_hubspot_contacts] >> entity_index
     entity_index >> blocking_index
 
     # Core: needs semantic + staging
-    [entity_index, stg_shopify_customers, stg_hubspot_contacts] >> core_customers
+    [entity_index, stg_shopify_customers, stg_stripe_customers, stg_hubspot_contacts] >> core_customers
     [stg_shopify_orders, core_customers] >> core_orders
 
     # Analytics: needs core

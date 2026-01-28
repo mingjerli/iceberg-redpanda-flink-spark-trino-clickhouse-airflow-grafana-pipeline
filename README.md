@@ -352,8 +352,8 @@ docker exec -it iceberg-spark-master /opt/spark/bin/spark-sql \
 
 | Layer | Description | Tables |
 |-------|-------------|--------|
-| **Raw** | Append-only webhook events | `raw.shopify_orders`, `raw.shopify_customers`, `raw.stripe_charges`, `raw.hubspot_contacts` |
-| **Staging** | Cleaned and typed data | `staging.stg_shopify_orders`, `staging.stg_shopify_customers`, `staging.stg_stripe_charges`, `staging.stg_hubspot_contacts` |
+| **Raw** | Append-only webhook events | `raw.shopify_orders`, `raw.shopify_customers`, `raw.stripe_charges`, `raw.stripe_customers`, `raw.hubspot_contacts` |
+| **Staging** | Cleaned and typed data | `staging.stg_shopify_orders`, `staging.stg_shopify_customers`, `staging.stg_stripe_charges`, `staging.stg_stripe_customers`, `staging.stg_hubspot_contacts` |
 | **Semantic** | Entity resolution | `semantic.entity_index`, `semantic.blocking_index` |
 | **Analytics** | Aggregated metrics | `analytics.customer_metrics`, `analytics.order_summary`, `analytics.payment_metrics` |
 | **Marts** | Business-ready views | `marts.customer_360`, `marts.sales_dashboard_daily` |

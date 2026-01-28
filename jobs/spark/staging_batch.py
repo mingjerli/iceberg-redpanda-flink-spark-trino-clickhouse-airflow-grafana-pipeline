@@ -30,6 +30,7 @@ from pyspark.sql.functions import (
     coalesce,
     concat,
     current_timestamp,
+    expr,
     get_json_object,
     length,
     lit,
@@ -531,6 +532,122 @@ def stage_stripe_charges(spark: SparkSession, mode: str = "incremental"):
     return record_count
 
 
+def stage_stripe_customers(spark: SparkSession, mode: str = "incremental"):
+    """Transform raw.stripe_customers to staging.stg_stripe_customers."""
+    logger.info(f"Processing stripe_customers in {mode} mode")
+
+    # Create staging table if not exists
+    spark.sql("""
+        CREATE TABLE IF NOT EXISTS iceberg.staging.stg_stripe_customers (
+            customer_id STRING,
+            email STRING,
+            name STRING,
+            first_name STRING,
+            last_name STRING,
+            full_name STRING,
+            phone STRING,
+            address_line1 STRING,
+            address_line2 STRING,
+            city STRING,
+            state STRING,
+            postal_code STRING,
+            country STRING,
+            shipping_name STRING,
+            shipping_address_line1 STRING,
+            shipping_city STRING,
+            shipping_state STRING,
+            shipping_postal_code STRING,
+            shipping_country STRING,
+            balance DECIMAL(18, 2),
+            currency STRING,
+            delinquent BOOLEAN,
+            tax_exempt STRING,
+            invoice_prefix STRING,
+            description STRING,
+            is_live BOOLEAN,
+            created_at TIMESTAMP,
+            _raw_id STRING,
+            _webhook_event_id STRING,
+            _loaded_at TIMESTAMP,
+            _staged_at TIMESTAMP
+        )
+        USING iceberg
+        PARTITIONED BY (months(created_at))
+    """)
+
+    # Read source data
+    raw_df = spark.table("iceberg.raw.stripe_customers")
+
+    # Apply watermark filter for incremental mode
+    if mode == "incremental":
+        watermark = get_watermark(spark, "stg_stripe_customers")
+        if watermark:
+            raw_df = raw_df.filter(col("_loaded_at") > watermark)
+            logger.info(f"Incremental filter: _loaded_at > {watermark}")
+
+    record_count = raw_df.count()
+    if record_count == 0:
+        logger.info("No new records to process")
+        return 0
+
+    logger.info(f"Processing {record_count} records")
+
+    # Transform
+    staged_df = raw_df.select(
+        col("id").alias("customer_id"),
+        lower(trim(col("email"))).alias("email"),
+        trim(col("name")).alias("name"),
+        # Extract first/last name from full name
+        when(col("name").contains(" "),
+             trim(split(col("name"), " ").getItem(0)))
+        .otherwise(col("name"))
+        .alias("first_name"),
+        when(col("name").contains(" "),
+             trim(expr("substring(name, instr(name, ' ') + 1)")))
+        .otherwise(lit(None))
+        .alias("last_name"),
+        trim(col("name")).alias("full_name"),
+        trim(col("phone")).alias("phone"),
+        # Address fields from JSON
+        get_json_object(col("address"), "$.line1").alias("address_line1"),
+        get_json_object(col("address"), "$.line2").alias("address_line2"),
+        get_json_object(col("address"), "$.city").alias("city"),
+        get_json_object(col("address"), "$.state").alias("state"),
+        get_json_object(col("address"), "$.postal_code").alias("postal_code"),
+        get_json_object(col("address"), "$.country").alias("country"),
+        # Shipping address
+        get_json_object(col("shipping"), "$.name").alias("shipping_name"),
+        get_json_object(col("shipping"), "$.address.line1").alias("shipping_address_line1"),
+        get_json_object(col("shipping"), "$.address.city").alias("shipping_city"),
+        get_json_object(col("shipping"), "$.address.state").alias("shipping_state"),
+        get_json_object(col("shipping"), "$.address.postal_code").alias("shipping_postal_code"),
+        get_json_object(col("shipping"), "$.address.country").alias("shipping_country"),
+        # Financial
+        (col("balance") / 100).cast("decimal(18,2)").alias("balance"),
+        upper(col("currency")).alias("currency"),
+        coalesce(col("delinquent"), lit(False)).alias("delinquent"),
+        col("tax_exempt"),
+        col("invoice_prefix"),
+        col("description"),
+        coalesce(col("livemode"), lit(False)).alias("is_live"),
+        col("created").alias("created_at"),
+        col("id").alias("_raw_id"),
+        col("_webhook_event_id"),
+        col("_loaded_at"),
+        current_timestamp().alias("_staged_at")
+    )
+
+    # Write to staging
+    staged_df.write \
+        .format("iceberg") \
+        .mode("append") \
+        .saveAsTable("iceberg.staging.stg_stripe_customers")
+
+    logger.info(f"Successfully staged {record_count} stripe_customers records")
+    update_watermark(spark, "stg_stripe_customers", record_count)
+    return record_count
+
+
 def stage_hubspot_contacts(spark: SparkSession, mode: str = "incremental"):
     """Transform raw.hubspot_contacts to staging.stg_hubspot_contacts."""
     logger.info(f"Processing hubspot_contacts in {mode} mode")
@@ -720,6 +837,7 @@ STAGING_FUNCTIONS = {
     "shopify_orders": stage_shopify_orders,
     "shopify_customers": stage_shopify_customers,
     "stripe_charges": stage_stripe_charges,
+    "stripe_customers": stage_stripe_customers,
     "hubspot_contacts": stage_hubspot_contacts,
 }
 
