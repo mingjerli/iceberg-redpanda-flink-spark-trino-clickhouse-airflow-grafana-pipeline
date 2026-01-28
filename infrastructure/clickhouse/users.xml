@@ -21,6 +21,7 @@ User and profile configuration for ClickHouse.
 
             <!-- Iceberg-specific settings -->
             <allow_experimental_object_type>1</allow_experimental_object_type>
+            <iceberg_engine_ignore_schema_evolution>1</iceberg_engine_ignore_schema_evolution>
         </default>
 
         <readonly>

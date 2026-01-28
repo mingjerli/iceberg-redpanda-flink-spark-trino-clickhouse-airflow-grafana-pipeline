@@ -1,0 +1,246 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "panels": [],
+      "title": "Customer Overview",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "id": 2,
+      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+        "format": 1,
+        "queryType": "sql",
+        "rawSql": "SELECT count(*) as total FROM iceberg.customer_360",
+        "refId": "A"
+      }],
+      "title": "Total Customers",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "id": 3,
+      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+        "format": 1,
+        "queryType": "sql",
+        "rawSql": "SELECT count(*) as total FROM iceberg.order_summary",
+        "refId": "A"
+      }],
+      "title": "Total Orders",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "purple", "value": null }] },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "id": 4,
+      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+        "format": 1,
+        "queryType": "sql",
+        "rawSql": "SELECT sum(total_spent) as total FROM iceberg.customer_metrics",
+        "refId": "A"
+      }],
+      "title": "Total Revenue",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }] },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "id": 5,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+        "format": 1,
+        "queryType": "sql",
+        "rawSql": "SELECT avg(total_spent) as avg FROM iceberg.customer_metrics",
+        "refId": "A"
+      }],
+      "title": "Avg Customer Value",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 6,
+      "panels": [],
+      "title": "Customer 360 View",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "total_spent" }, "properties": [{ "id": "unit", "value": "currencyUSD" }] },
+          { "matcher": { "id": "byName", "options": "avg_order_value" }, "properties": [{ "id": "unit", "value": "currencyUSD" }] }
+        ]
+      },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 6 },
+      "id": 7,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "enablePagination": true, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true,
+        "sortBy": []
+      },
+      "targets": [{
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+        "format": 1,
+        "queryType": "sql",
+        "rawSql": "SELECT * FROM iceberg.customer_360 ORDER BY total_spent DESC LIMIT 100",
+        "refId": "A"
+      }],
+      "title": "Top Customers by Revenue",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "id": 8,
+      "panels": [],
+      "title": "Sales Dashboard",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "total_revenue" }, "properties": [{ "id": "unit", "value": "currencyUSD" }] },
+          { "matcher": { "id": "byName", "options": "avg_order_value" }, "properties": [{ "id": "unit", "value": "currencyUSD" }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 17 },
+      "id": 9,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "enablePagination": true, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true,
+        "sortBy": []
+      },
+      "targets": [{
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+        "format": 1,
+        "queryType": "sql",
+        "rawSql": "SELECT date_key, day_name, gross_revenue, net_revenue, total_orders, total_customers, avg_order_value, total_discounts, total_tax FROM iceberg.sales_dashboard_daily ORDER BY date_key DESC LIMIT 30",
+        "refId": "A"
+      }],
+      "title": "Daily Sales Summary",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 },
+      "id": 10,
+      "panels": [],
+      "title": "Customer Metrics",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "total_spent" }, "properties": [{ "id": "unit", "value": "currencyUSD" }] },
+          { "matcher": { "id": "byName", "options": "avg_order_value" }, "properties": [{ "id": "unit", "value": "currencyUSD" }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 26 },
+      "id": 11,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "enablePagination": true, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true,
+        "sortBy": []
+      },
+      "targets": [{
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+        "format": 1,
+        "queryType": "sql",
+        "rawSql": "SELECT * FROM iceberg.customer_metrics ORDER BY total_spent DESC LIMIT 100",
+        "refId": "A"
+      }],
+      "title": "Customer Metrics Detail",
+      "type": "table"
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 38,
+  "tags": ["batch", "business", "clickhouse", "iceberg"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Batch Business Metrics",
+  "uid": "batch-business",
+  "version": 1,
+  "weekStart": ""
+}

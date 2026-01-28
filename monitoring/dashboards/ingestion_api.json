@@ -136,13 +136,13 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=\"ingestion-api\"}[5m]))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"ingestion-api\"}[5m])) by (le, handler))",
           "legendFormat": "p95 {{handler}}",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket{job=\"ingestion-api\"}[5m]))",
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"ingestion-api\"}[5m])) by (le, handler))",
           "legendFormat": "p50 {{handler}}",
           "refId": "B"
         }
@@ -287,7 +287,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "increase(http_requests_total{job=\"ingestion-api\", status=~\"4..|5..\"}[5m])",
+          "expr": "increase(http_requests_total{job=\"ingestion-api\", status=~\"4xx|5xx\"}[5m])",
           "legendFormat": "{{handler}} {{status}}",
           "refId": "A"
         }
@@ -410,6 +410,6 @@
   "timezone": "browser",
   "title": "Ingestion API",
   "uid": "ingestion-api",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

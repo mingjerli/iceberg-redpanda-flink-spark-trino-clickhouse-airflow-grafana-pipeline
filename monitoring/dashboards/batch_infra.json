@@ -12,7 +12,7 @@
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
       "id": 1,
       "panels": [],
-      "title": "Spark Batch Jobs",
+      "title": "Airflow Pipeline Tasks",
       "type": "row"
     },
     {
@@ -26,11 +26,11 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
       "id": 2,
       "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "spark_job_count{status=\"succeeded\"}", "legendFormat": "Succeeded", "refId": "A" }],
-      "title": "Successful Jobs",
+      "targets": [{ "expr": "sum(airflow_ti_successes)", "legendFormat": "Succeeded", "refId": "A" }],
+      "title": "Successful Tasks",
       "type": "stat"
     },
     {
@@ -44,11 +44,11 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
       "id": 3,
       "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "spark_job_count{status=\"failed\"}", "legendFormat": "Failed", "refId": "A" }],
-      "title": "Failed Jobs",
+      "targets": [{ "expr": "sum(airflow_ti_failures)", "legendFormat": "Failed", "refId": "A" }],
+      "title": "Failed Tasks",
       "type": "stat"
     },
     {
@@ -62,11 +62,11 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
       "id": 4,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["mean"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "avg(spark_job_duration_seconds)", "legendFormat": "Avg Duration", "refId": "A" }],
-      "title": "Avg Job Duration",
+      "targets": [{ "expr": "avg(airflow_dag_iceberg_pipeline_customer_360_duration_sum / airflow_dag_iceberg_pipeline_customer_360_duration_count)", "legendFormat": "Avg Duration", "refId": "A" }],
+      "title": "Avg Task Duration",
       "type": "stat"
     },
     {
@@ -80,87 +80,20 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
       "id": 5,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "sum(spark_stage_count)", "legendFormat": "Stages", "refId": "A" }],
-      "title": "Total Stages",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
-          "unit": "bytes"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
-      "id": 6,
-      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "sum(spark_shuffle_bytes_written)", "legendFormat": "Shuffle Write", "refId": "A" }],
-      "title": "Shuffle Bytes Written",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
-      "id": 7,
-      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-      "targets": [{ "expr": "sum(spark_records_written)", "legendFormat": "Records Written", "refId": "A" }],
-      "title": "Records Written",
+      "targets": [{ "expr": "sum(airflow_dag_run_count{dag_id=\"iceberg_pipeline\"})", "legendFormat": "DAG Runs", "refId": "A" }],
+      "title": "Total DAG Runs",
       "type": "stat"
     },
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
-      "id": 8,
+      "id": 6,
       "panels": [],
-      "title": "Iceberg Table Metrics",
+      "title": "Pipeline Task Duration",
       "type": "row"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "axisBorderShow": false, "axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto",
-            "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
-            "insertNulls": false, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5,
-            "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false,
-            "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" }
-          },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
-      "id": 9,
-      "options": {
-        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
-      },
-      "targets": [
-        { "expr": "iceberg_table_snapshot_count{table=~\".*\"}", "legendFormat": "{{table}}", "refId": "A" }
-      ],
-      "title": "Iceberg Snapshot Count by Table",
-      "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
@@ -173,32 +106,40 @@
             "hideFrom": { "legend": false, "tooltip": false, "viz": false },
             "insertNulls": false, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5,
             "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": false,
-            "stacking": { "group": "A", "mode": "normal" }, "thresholdsStyle": { "mode": "off" }
+            "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" }
           },
           "mappings": [],
           "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
-          "unit": "bytes"
+          "unit": "s"
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
-      "id": 10,
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
+      "id": 7,
       "options": {
-        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
         "tooltip": { "mode": "multi", "sort": "desc" }
       },
       "targets": [
-        { "expr": "iceberg_table_size_bytes{table=~\".*\"}", "legendFormat": "{{table}}", "refId": "A" }
+        { "expr": "airflow_dag_iceberg_pipeline_stg_shopify_orders_duration_sum / airflow_dag_iceberg_pipeline_stg_shopify_orders_duration_count", "legendFormat": "stg_shopify_orders", "refId": "A" },
+        { "expr": "airflow_dag_iceberg_pipeline_stg_shopify_customers_duration_sum / airflow_dag_iceberg_pipeline_stg_shopify_customers_duration_count", "legendFormat": "stg_shopify_customers", "refId": "B" },
+        { "expr": "airflow_dag_iceberg_pipeline_stg_stripe_charges_duration_sum / airflow_dag_iceberg_pipeline_stg_stripe_charges_duration_count", "legendFormat": "stg_stripe_charges", "refId": "C" },
+        { "expr": "airflow_dag_iceberg_pipeline_stg_hubspot_contacts_duration_sum / airflow_dag_iceberg_pipeline_stg_hubspot_contacts_duration_count", "legendFormat": "stg_hubspot_contacts", "refId": "D" },
+        { "expr": "airflow_dag_iceberg_pipeline_entity_index_duration_sum / airflow_dag_iceberg_pipeline_entity_index_duration_count", "legendFormat": "entity_index", "refId": "E" },
+        { "expr": "airflow_dag_iceberg_pipeline_core_customers_duration_sum / airflow_dag_iceberg_pipeline_core_customers_duration_count", "legendFormat": "core_customers", "refId": "F" },
+        { "expr": "airflow_dag_iceberg_pipeline_core_orders_duration_sum / airflow_dag_iceberg_pipeline_core_orders_duration_count", "legendFormat": "core_orders", "refId": "G" },
+        { "expr": "airflow_dag_iceberg_pipeline_customer_metrics_duration_sum / airflow_dag_iceberg_pipeline_customer_metrics_duration_count", "legendFormat": "customer_metrics", "refId": "H" },
+        { "expr": "airflow_dag_iceberg_pipeline_customer_360_duration_sum / airflow_dag_iceberg_pipeline_customer_360_duration_count", "legendFormat": "customer_360", "refId": "I" }
       ],
-      "title": "Iceberg Table Size",
+      "title": "Task Duration by Stage",
       "type": "timeseries"
     },
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
-      "id": 11,
+      "id": 8,
       "panels": [],
-      "title": "Staging Layer Metrics",
+      "title": "DAG Run History",
       "type": "row"
     },
     {
@@ -211,7 +152,7 @@
             "barAlignment": 0, "drawStyle": "line", "fillOpacity": 20, "gradientMode": "none",
             "hideFrom": { "legend": false, "tooltip": false, "viz": false },
             "insertNulls": false, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5,
-            "scaleDistribution": { "type": "linear" }, "showPoints": "never", "spanNulls": true,
+            "scaleDistribution": { "type": "linear" }, "showPoints": "auto", "spanNulls": true,
             "stacking": { "group": "A", "mode": "none" }, "thresholdsStyle": { "mode": "off" }
           },
           "mappings": [],
@@ -221,15 +162,16 @@
         "overrides": []
       },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
-      "id": 12,
+      "id": 9,
       "options": {
         "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": true },
         "tooltip": { "mode": "multi", "sort": "desc" }
       },
       "targets": [
-        { "expr": "increase(staging_records_processed{table=~\".*\"}[1h])", "legendFormat": "{{table}}", "refId": "A" }
+        { "expr": "increase(airflow_ti_successes[1h])", "legendFormat": "Successes", "refId": "A" },
+        { "expr": "increase(airflow_ti_failures[1h])", "legendFormat": "Failures", "refId": "B" }
       ],
-      "title": "Records Processed (1h)",
+      "title": "Task Completions (1h)",
       "type": "timeseries"
     },
     {
@@ -252,27 +194,27 @@
         "overrides": []
       },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
-      "id": 13,
+      "id": 10,
       "options": {
         "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
         "tooltip": { "mode": "multi", "sort": "desc" }
       },
       "targets": [
-        { "expr": "staging_job_duration_seconds{table=~\".*\"}", "legendFormat": "{{table}}", "refId": "A" }
+        { "expr": "airflow_dag_processing_total_parse_time", "legendFormat": "Parse Time", "refId": "A" }
       ],
-      "title": "Staging Job Duration",
+      "title": "DAG Processing Time",
       "type": "timeseries"
     }
   ],
   "refresh": "30s",
   "schemaVersion": 38,
-  "tags": ["batch", "spark", "iceberg", "staging"],
+  "tags": ["batch", "infrastructure", "airflow", "spark"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Batch Processing Metrics",
-  "uid": "batch-metrics-dashboard",
+  "title": "Batch Infrastructure",
+  "uid": "batch-infra",
   "version": 1,
   "weekStart": ""
 }

@@ -125,8 +125,8 @@ start_infrastructure() {
 
     cd "$INFRA_DIR"
 
-    echo "Building and starting all services..."
-    docker-compose up -d --build
+    echo "Building and starting all services (including datagen for continuous data feed)..."
+    docker-compose --profile datagen up -d --build
 
     echo ""
     echo "Waiting for services to be healthy..."
@@ -435,7 +435,31 @@ validate_tables() {
 }
 
 # =============================================================================
-# PHASE 8: Trigger Airflow DAG (Optional)
+# PHASE 8: Setup ClickHouse Iceberg Views
+# =============================================================================
+setup_clickhouse_views() {
+    log_step "PHASE 8: Setting up ClickHouse Iceberg Views"
+
+    cd "$INFRA_DIR"
+
+    echo "Creating ClickHouse views for Iceberg tables..."
+    docker exec -i iceberg-clickhouse clickhouse-client --multiquery < clickhouse/iceberg_setup.sql 2>&1 | tail -5 || {
+        log_warning "Some ClickHouse views may have failed"
+    }
+
+    # Verify views were created
+    local view_count=$(docker exec iceberg-clickhouse clickhouse-client --query "SHOW TABLES FROM iceberg" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "${view_count:-0}" -ge 10 ]; then
+        log_success "Created $view_count ClickHouse views for Iceberg tables"
+    else
+        log_warning "Only created ${view_count:-0} views (expected 10+)"
+    fi
+
+    echo "  Views enable querying Iceberg tables from Grafana dashboards"
+}
+
+# =============================================================================
+# PHASE 9: Trigger Airflow DAG (Optional)
 # =============================================================================
 trigger_airflow_dag() {
     log_step "PHASE 8: Triggering Airflow DAG (for ongoing scheduling)"
@@ -515,6 +539,7 @@ main() {
     verify_raw_tables
     run_batch_pipeline
     validate_tables
+    setup_clickhouse_views
     trigger_airflow_dag
 
     echo ""

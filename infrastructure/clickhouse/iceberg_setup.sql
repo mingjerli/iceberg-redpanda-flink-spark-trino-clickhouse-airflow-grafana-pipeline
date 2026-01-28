@@ -14,13 +14,8 @@
 -- Create database for Iceberg views
 CREATE DATABASE IF NOT EXISTS iceberg;
 
--- =============================================================================
--- Helper Functions / Settings
--- =============================================================================
-
--- Set S3 credentials for the session (used by iceberg() function)
-SET s3_access_key_id = 'admin';
-SET s3_secret_access_key = 'admin123456';
+-- Enable schema evolution support for Iceberg tables
+SET iceberg_engine_ignore_schema_evolution = 1;
 
 -- =============================================================================
 -- Raw Layer Views
@@ -30,23 +25,23 @@ SET s3_secret_access_key = 'admin123456';
 
 CREATE OR REPLACE VIEW iceberg.raw_shopify_orders AS
 SELECT *
-FROM iceberg('http://minio:9000/warehouse/raw/shopify_orders/metadata/00001-*.metadata.json',
-             'admin', 'admin123456');
+FROM iceberg('http://minio:9000/warehouse/raw/shopify_orders/',
+             'admin', 'admin123');
 
 CREATE OR REPLACE VIEW iceberg.raw_shopify_customers AS
 SELECT *
-FROM iceberg('http://minio:9000/warehouse/raw/shopify_customers/metadata/00001-*.metadata.json',
-             'admin', 'admin123456');
+FROM iceberg('http://minio:9000/warehouse/raw/shopify_customers/',
+             'admin', 'admin123');
 
 CREATE OR REPLACE VIEW iceberg.raw_stripe_charges AS
 SELECT *
-FROM iceberg('http://minio:9000/warehouse/raw/stripe_charges/metadata/00001-*.metadata.json',
-             'admin', 'admin123456');
+FROM iceberg('http://minio:9000/warehouse/raw/stripe_charges/',
+             'admin', 'admin123');
 
 CREATE OR REPLACE VIEW iceberg.raw_hubspot_contacts AS
 SELECT *
-FROM iceberg('http://minio:9000/warehouse/raw/hubspot_contacts/metadata/00001-*.metadata.json',
-             'admin', 'admin123456');
+FROM iceberg('http://minio:9000/warehouse/raw/hubspot_contacts/',
+             'admin', 'admin123');
 
 -- =============================================================================
 -- Staging Layer Views
@@ -54,23 +49,23 @@ FROM iceberg('http://minio:9000/warehouse/raw/hubspot_contacts/metadata/00001-*.
 
 CREATE OR REPLACE VIEW iceberg.stg_shopify_orders AS
 SELECT *
-FROM iceberg('http://minio:9000/warehouse/staging/stg_shopify_orders/metadata/00001-*.metadata.json',
-             'admin', 'admin123456');
+FROM iceberg('http://minio:9000/warehouse/staging/stg_shopify_orders/',
+             'admin', 'admin123');
 
 CREATE OR REPLACE VIEW iceberg.stg_shopify_customers AS
 SELECT *
-FROM iceberg('http://minio:9000/warehouse/staging/stg_shopify_customers/metadata/00001-*.metadata.json',
-             'admin', 'admin123456');
+FROM iceberg('http://minio:9000/warehouse/staging/stg_shopify_customers/',
+             'admin', 'admin123');
 
 CREATE OR REPLACE VIEW iceberg.stg_stripe_charges AS
 SELECT *
-FROM iceberg('http://minio:9000/warehouse/staging/stg_stripe_charges/metadata/00001-*.metadata.json',
-             'admin', 'admin123456');
+FROM iceberg('http://minio:9000/warehouse/staging/stg_stripe_charges/',
+             'admin', 'admin123');
 
 CREATE OR REPLACE VIEW iceberg.stg_hubspot_contacts AS
 SELECT *
-FROM iceberg('http://minio:9000/warehouse/staging/stg_hubspot_contacts/metadata/00001-*.metadata.json',
-             'admin', 'admin123456');
+FROM iceberg('http://minio:9000/warehouse/staging/stg_hubspot_contacts/',
+             'admin', 'admin123');
 
 -- =============================================================================
 -- Semantic Layer Views
@@ -78,8 +73,8 @@ FROM iceberg('http://minio:9000/warehouse/staging/stg_hubspot_contacts/metadata/
 
 CREATE OR REPLACE VIEW iceberg.entity_index AS
 SELECT *
-FROM iceberg('http://minio:9000/warehouse/semantic/entity_index/metadata/00001-*.metadata.json',
-             'admin', 'admin123456');
+FROM iceberg('http://minio:9000/warehouse/semantic/entity_index/',
+             'admin', 'admin123');
 
 -- =============================================================================
 -- Analytics Layer Views
@@ -87,18 +82,18 @@ FROM iceberg('http://minio:9000/warehouse/semantic/entity_index/metadata/00001-*
 
 CREATE OR REPLACE VIEW iceberg.customer_metrics AS
 SELECT *
-FROM iceberg('http://minio:9000/warehouse/analytics/customer_metrics/metadata/00001-*.metadata.json',
-             'admin', 'admin123456');
+FROM iceberg('http://minio:9000/warehouse/analytics/customer_metrics/',
+             'admin', 'admin123');
 
 CREATE OR REPLACE VIEW iceberg.order_summary AS
 SELECT *
-FROM iceberg('http://minio:9000/warehouse/analytics/order_summary/metadata/00001-*.metadata.json',
-             'admin', 'admin123456');
+FROM iceberg('http://minio:9000/warehouse/analytics/order_summary/',
+             'admin', 'admin123');
 
 CREATE OR REPLACE VIEW iceberg.payment_metrics AS
 SELECT *
-FROM iceberg('http://minio:9000/warehouse/analytics/payment_metrics/metadata/00001-*.metadata.json',
-             'admin', 'admin123456');
+FROM iceberg('http://minio:9000/warehouse/analytics/payment_metrics/',
+             'admin', 'admin123');
 
 -- =============================================================================
 -- Marts Layer Views
@@ -106,13 +101,13 @@ FROM iceberg('http://minio:9000/warehouse/analytics/payment_metrics/metadata/000
 
 CREATE OR REPLACE VIEW iceberg.customer_360 AS
 SELECT *
-FROM iceberg('http://minio:9000/warehouse/marts/customer_360/metadata/00001-*.metadata.json',
-             'admin', 'admin123456');
+FROM iceberg('http://minio:9000/warehouse/marts/customer_360/',
+             'admin', 'admin123');
 
 CREATE OR REPLACE VIEW iceberg.sales_dashboard_daily AS
 SELECT *
-FROM iceberg('http://minio:9000/warehouse/marts/sales_dashboard_daily/metadata/00001-*.metadata.json',
-             'admin', 'admin123456');
+FROM iceberg('http://minio:9000/warehouse/marts/sales_dashboard_daily/',
+             'admin', 'admin123');
 
 -- =============================================================================
 -- Verification Queries

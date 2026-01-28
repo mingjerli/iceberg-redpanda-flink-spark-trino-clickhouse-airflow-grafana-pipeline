@@ -19,14 +19,17 @@ datasources:
       timeInterval: "15s"
       httpMethod: POST
 
-  # ClickHouse datasource (optional - requires grafana-clickhouse-datasource plugin)
-  # - name: ClickHouse
-  #   type: grafana-clickhouse-datasource
-  #   uid: clickhouse
-  #   access: proxy
-  #   url: http://clickhouse:8123
-  #   editable: false
-  #   jsonData:
-  #     defaultDatabase: default
-  #   secureJsonData:
-  #     password: clickhouse123
+  # ClickHouse datasource for querying Iceberg tables
+  - name: ClickHouse
+    type: grafana-clickhouse-datasource
+    uid: clickhouse
+    access: proxy
+    url: http://clickhouse:8123
+    editable: false
+    jsonData:
+      defaultDatabase: iceberg
+      port: 9000
+      server: clickhouse
+      username: default
+    secureJsonData:
+      password: admin123
