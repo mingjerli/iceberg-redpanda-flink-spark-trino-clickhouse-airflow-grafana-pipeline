@@ -26,27 +26,27 @@ SET iceberg_engine_ignore_schema_evolution = 1;
 CREATE OR REPLACE VIEW iceberg.raw_shopify_orders AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/raw/shopify_orders/',
-             'admin', 'admin123');
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 CREATE OR REPLACE VIEW iceberg.raw_shopify_customers AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/raw/shopify_customers/',
-             'admin', 'admin123');
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 CREATE OR REPLACE VIEW iceberg.raw_stripe_charges AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/raw/stripe_charges/',
-             'admin', 'admin123');
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 CREATE OR REPLACE VIEW iceberg.raw_stripe_customers AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/raw/stripe_customers/',
-             'admin', 'admin123');
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 CREATE OR REPLACE VIEW iceberg.raw_hubspot_contacts AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/raw/hubspot_contacts/',
-             'admin', 'admin123');
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 -- =============================================================================
 -- Staging Layer Views
@@ -55,27 +55,27 @@ FROM iceberg('http://minio:9000/warehouse/raw/hubspot_contacts/',
 CREATE OR REPLACE VIEW iceberg.stg_shopify_orders AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/staging/stg_shopify_orders/',
-             'admin', 'admin123');
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 CREATE OR REPLACE VIEW iceberg.stg_shopify_customers AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/staging/stg_shopify_customers/',
-             'admin', 'admin123');
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 CREATE OR REPLACE VIEW iceberg.stg_stripe_charges AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/staging/stg_stripe_charges/',
-             'admin', 'admin123');
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 CREATE OR REPLACE VIEW iceberg.stg_stripe_customers AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/staging/stg_stripe_customers/',
-             'admin', 'admin123');
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 CREATE OR REPLACE VIEW iceberg.stg_hubspot_contacts AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/staging/stg_hubspot_contacts/',
-             'admin', 'admin123');
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 -- =============================================================================
 -- Semantic Layer Views
@@ -84,7 +84,7 @@ FROM iceberg('http://minio:9000/warehouse/staging/stg_hubspot_contacts/',
 CREATE OR REPLACE VIEW iceberg.entity_index AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/semantic/entity_index/',
-             'admin', 'admin123');
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 -- =============================================================================
 -- Analytics Layer Views
@@ -93,17 +93,17 @@ FROM iceberg('http://minio:9000/warehouse/semantic/entity_index/',
 CREATE OR REPLACE VIEW iceberg.customer_metrics AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/analytics/customer_metrics/',
-             'admin', 'admin123');
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 CREATE OR REPLACE VIEW iceberg.order_summary AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/analytics/order_summary/',
-             'admin', 'admin123');
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 CREATE OR REPLACE VIEW iceberg.payment_metrics AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/analytics/payment_metrics/',
-             'admin', 'admin123');
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 -- =============================================================================
 -- Marts Layer Views
@@ -112,12 +112,12 @@ FROM iceberg('http://minio:9000/warehouse/analytics/payment_metrics/',
 CREATE OR REPLACE VIEW iceberg.customer_360 AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/marts/customer_360/',
-             'admin', 'admin123');
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 CREATE OR REPLACE VIEW iceberg.sales_dashboard_daily AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/marts/sales_dashboard_daily/',
-             'admin', 'admin123');
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 -- =============================================================================
 -- Verification Queries

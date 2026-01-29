@@ -31,8 +31,6 @@ CREATE CATALOG iceberg WITH (
     'uri' = 'http://iceberg-rest:8181',
     'warehouse' = 's3://warehouse/',
     's3.endpoint' = 'http://minio:9000',
-    's3.access-key-id' = 'admin',
-    's3.secret-access-key' = 'password',
     's3.path-style-access' = 'true'
 );
 

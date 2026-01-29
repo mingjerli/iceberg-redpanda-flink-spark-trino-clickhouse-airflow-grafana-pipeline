@@ -14,12 +14,17 @@ Usage:
 
 import argparse
 import json
+import os
 import statistics
 import subprocess
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
+
+# Get credentials from environment variables
+MINIO_ROOT_USER = os.environ.get("MINIO_ROOT_USER", "admin")
+MINIO_ROOT_PASSWORD = os.environ.get("MINIO_ROOT_PASSWORD", "admin123")
 
 
 @dataclass
@@ -248,8 +253,8 @@ def run_spark_query(query: str) -> tuple[float, int, Optional[str]]:
                 "--conf", "spark.sql.catalog.iceberg.warehouse=s3a://warehouse/",
                 "--conf", "spark.sql.catalog.iceberg.io-impl=org.apache.iceberg.aws.s3.S3FileIO",
                 "--conf", "spark.sql.catalog.iceberg.s3.endpoint=http://minio:9000",
-                "--conf", "spark.sql.catalog.iceberg.s3.access-key-id=admin",
-                "--conf", "spark.sql.catalog.iceberg.s3.secret-access-key=admin123",
+                "--conf", f"spark.sql.catalog.iceberg.s3.access-key-id={MINIO_ROOT_USER}",
+                "--conf", f"spark.sql.catalog.iceberg.s3.secret-access-key={MINIO_ROOT_PASSWORD}",
                 "--conf", "spark.sql.catalog.iceberg.s3.path-style-access=true",
                 "-e", query,
             ],
