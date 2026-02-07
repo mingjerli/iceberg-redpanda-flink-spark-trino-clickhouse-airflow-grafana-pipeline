@@ -48,6 +48,21 @@ SELECT *
 FROM iceberg('http://minio:9000/warehouse/raw/hubspot_contacts/',
              '__MINIO_USER__', '__MINIO_PASSWORD__');
 
+CREATE OR REPLACE VIEW iceberg.raw_mailchimp_campaigns AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/raw/mailchimp_campaigns/',
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
+
+CREATE OR REPLACE VIEW iceberg.raw_mailchimp_events AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/raw/mailchimp_events/',
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
+
+CREATE OR REPLACE VIEW iceberg.raw_mailchimp_subscribers AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/raw/mailchimp_subscribers/',
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
+
 -- =============================================================================
 -- Staging Layer Views
 -- =============================================================================
@@ -75,6 +90,21 @@ FROM iceberg('http://minio:9000/warehouse/staging/stg_stripe_customers/',
 CREATE OR REPLACE VIEW iceberg.stg_hubspot_contacts AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/staging/stg_hubspot_contacts/',
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
+
+CREATE OR REPLACE VIEW iceberg.stg_mailchimp_campaigns AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/staging/stg_mailchimp_campaigns/',
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
+
+CREATE OR REPLACE VIEW iceberg.stg_mailchimp_events AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/staging/stg_mailchimp_events/',
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
+
+CREATE OR REPLACE VIEW iceberg.stg_mailchimp_subscribers AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/staging/stg_mailchimp_subscribers/',
              '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 -- =============================================================================
@@ -105,6 +135,11 @@ SELECT *
 FROM iceberg('http://minio:9000/warehouse/analytics/payment_metrics/',
              '__MINIO_USER__', '__MINIO_PASSWORD__');
 
+CREATE OR REPLACE VIEW iceberg.campaign_metrics AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/analytics/campaign_metrics/',
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
+
 -- =============================================================================
 -- Marts Layer Views
 -- =============================================================================
@@ -117,6 +152,11 @@ FROM iceberg('http://minio:9000/warehouse/marts/customer_360/',
 CREATE OR REPLACE VIEW iceberg.sales_dashboard_daily AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/marts/sales_dashboard_daily/',
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
+
+CREATE OR REPLACE VIEW iceberg.campaign_dashboard AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/marts/campaign_dashboard/',
              '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 -- =============================================================================

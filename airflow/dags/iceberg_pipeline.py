@@ -2,8 +2,8 @@
 Airflow DAG: Iceberg Data Pipeline
 ==================================
 
-Batch data pipeline for processing Shopify, Stripe, and HubSpot data through
-staging, semantic, core, analytics, and marts layers using Apache Iceberg.
+Batch data pipeline for processing Shopify, Stripe, HubSpot, and Mailchimp data
+through staging, semantic, core, analytics, and marts layers using Apache Iceberg.
 
 Layer flow:
     raw (Flink streaming) -> staging -> semantic -> core -> analytics -> marts
@@ -71,7 +71,7 @@ default_args = {
 
 with DAG(
     dag_id="iceberg_pipeline",
-    description="Iceberg data pipeline: staging -> semantic -> core -> analytics -> marts",
+    description="Iceberg data pipeline: staging -> semantic -> core -> analytics -> marts (Shopify, Stripe, HubSpot, Mailchimp)",
     default_args=default_args,
     schedule="0 */4 * * *",
     start_date=datetime(2026, 1, 1),
@@ -110,6 +110,18 @@ with DAG(
     stg_hubspot_contacts = BashOperator(
         task_id="stg_hubspot_contacts",
         bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/staging_batch.py --table hubspot_contacts --mode incremental",
+    )
+    stg_mailchimp_campaigns = BashOperator(
+        task_id="stg_mailchimp_campaigns",
+        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/staging_batch.py --table mailchimp_campaigns --mode incremental",
+    )
+    stg_mailchimp_events = BashOperator(
+        task_id="stg_mailchimp_events",
+        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/staging_batch.py --table mailchimp_events --mode incremental",
+    )
+    stg_mailchimp_subscribers = BashOperator(
+        task_id="stg_mailchimp_subscribers",
+        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/staging_batch.py --table mailchimp_subscribers --mode incremental",
     )
 
     # -------------------------------------------------------------------------
@@ -154,6 +166,10 @@ with DAG(
         task_id="payment_metrics",
         bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/analytics_incremental.py --table payment_metrics --mode incremental",
     )
+    campaign_metrics = BashOperator(
+        task_id="campaign_metrics",
+        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/analytics_incremental.py --table campaign_metrics --mode incremental",
+    )
 
     # -------------------------------------------------------------------------
     # Marts Layer: dashboard-ready tables
@@ -167,30 +183,37 @@ with DAG(
         task_id="sales_dashboard",
         bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/marts_incremental.py --table sales_dashboard_daily --mode incremental",
     )
+    campaign_dashboard = BashOperator(
+        task_id="campaign_dashboard",
+        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/marts_incremental.py --table campaign_dashboard --mode incremental",
+    )
 
     # -------------------------------------------------------------------------
     # Dependencies
     # -------------------------------------------------------------------------
 
     # Staging: parallel from start
-    start >> [stg_shopify_orders, stg_shopify_customers, stg_stripe_charges, stg_stripe_customers, stg_hubspot_contacts]
+    start >> [stg_shopify_orders, stg_shopify_customers, stg_stripe_charges, stg_stripe_customers, stg_hubspot_contacts,
+              stg_mailchimp_campaigns, stg_mailchimp_events, stg_mailchimp_subscribers]
 
     # Semantic: needs customer data from all sources
-    [stg_shopify_customers, stg_stripe_customers, stg_hubspot_contacts] >> entity_index
+    [stg_shopify_customers, stg_stripe_customers, stg_hubspot_contacts, stg_mailchimp_subscribers] >> entity_index
     entity_index >> blocking_index
 
-    # Core: needs semantic + staging
+    # Core: needs semantic + staging (Mailchimp does not feed into core)
     [entity_index, stg_shopify_customers, stg_stripe_customers, stg_hubspot_contacts] >> core_customers
     [stg_shopify_orders, core_customers] >> core_orders
 
-    # Analytics: needs core
+    # Analytics: needs core + Mailchimp staging
     [core_customers, core_orders] >> customer_metrics
     core_orders >> order_summary
     stg_stripe_charges >> payment_metrics
+    [stg_mailchimp_campaigns, stg_mailchimp_events] >> campaign_metrics
 
     # Marts: needs analytics
     customer_metrics >> customer_360
     [order_summary, payment_metrics] >> sales_dashboard
+    campaign_metrics >> campaign_dashboard
 
     # End
-    [customer_360, sales_dashboard] >> end
+    [customer_360, sales_dashboard, campaign_dashboard] >> end

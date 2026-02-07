@@ -39,11 +39,17 @@ UNION ALL SELECT 'raw.shopify_customers', COUNT(*) FROM iceberg.raw.shopify_cust
 UNION ALL SELECT 'raw.stripe_charges', COUNT(*) FROM iceberg.raw.stripe_charges
 UNION ALL SELECT 'raw.stripe_customers', COUNT(*) FROM iceberg.raw.stripe_customers
 UNION ALL SELECT 'raw.hubspot_contacts', COUNT(*) FROM iceberg.raw.hubspot_contacts
+UNION ALL SELECT 'raw.mailchimp_campaigns', COUNT(*) FROM iceberg.raw.mailchimp_campaigns
+UNION ALL SELECT 'raw.mailchimp_events', COUNT(*) FROM iceberg.raw.mailchimp_events
+UNION ALL SELECT 'raw.mailchimp_subscribers', COUNT(*) FROM iceberg.raw.mailchimp_subscribers
 UNION ALL SELECT 'staging.stg_shopify_orders', COUNT(*) FROM iceberg.staging.stg_shopify_orders
 UNION ALL SELECT 'staging.stg_shopify_customers', COUNT(*) FROM iceberg.staging.stg_shopify_customers
 UNION ALL SELECT 'staging.stg_stripe_charges', COUNT(*) FROM iceberg.staging.stg_stripe_charges
 UNION ALL SELECT 'staging.stg_stripe_customers', COUNT(*) FROM iceberg.staging.stg_stripe_customers
 UNION ALL SELECT 'staging.stg_hubspot_contacts', COUNT(*) FROM iceberg.staging.stg_hubspot_contacts
+UNION ALL SELECT 'staging.stg_mailchimp_campaigns', COUNT(*) FROM iceberg.staging.stg_mailchimp_campaigns
+UNION ALL SELECT 'staging.stg_mailchimp_events', COUNT(*) FROM iceberg.staging.stg_mailchimp_events
+UNION ALL SELECT 'staging.stg_mailchimp_subscribers', COUNT(*) FROM iceberg.staging.stg_mailchimp_subscribers
 UNION ALL SELECT 'semantic.entity_index', COUNT(*) FROM iceberg.semantic.entity_index
 UNION ALL SELECT 'semantic.blocking_index', COUNT(*) FROM iceberg.semantic.blocking_index
 UNION ALL SELECT 'core.customers', COUNT(*) FROM iceberg.core.customers
@@ -51,7 +57,9 @@ UNION ALL SELECT 'core.orders', COUNT(*) FROM iceberg.core.orders
 UNION ALL SELECT 'analytics.customer_metrics', COUNT(*) FROM iceberg.analytics.customer_metrics
 UNION ALL SELECT 'analytics.order_summary', COUNT(*) FROM iceberg.analytics.order_summary
 UNION ALL SELECT 'analytics.payment_metrics', COUNT(*) FROM iceberg.analytics.payment_metrics
+UNION ALL SELECT 'analytics.campaign_metrics', COUNT(*) FROM iceberg.analytics.campaign_metrics
 UNION ALL SELECT 'marts.customer_360', COUNT(*) FROM iceberg.marts.customer_360
+UNION ALL SELECT 'marts.campaign_dashboard', COUNT(*) FROM iceberg.marts.campaign_dashboard
 ORDER BY table_name
 "
 

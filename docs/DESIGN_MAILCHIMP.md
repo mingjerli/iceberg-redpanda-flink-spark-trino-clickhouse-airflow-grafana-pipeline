@@ -1,5 +1,7 @@
 # Design: Mailchimp Integration
 
+> **Status**: Implemented (all 6 phases complete)
+
 This document describes the integration of Mailchimp as a new streaming data source into the existing pipeline. The design follows every convention established by the Shopify, Stripe, and HubSpot integrations.
 
 ---
