@@ -645,11 +645,218 @@ def compute_payment_metrics(spark: SparkSession, mode: str = "incremental"):
     return record_count
 
 
+def compute_campaign_metrics(spark: SparkSession, mode: str = "incremental"):
+    """Compute analytics.campaign_metrics from staging Mailchimp campaigns and events."""
+    logger.info(f"Processing campaign_metrics in {mode} mode")
+
+    spark.sql("""
+        CREATE TABLE IF NOT EXISTS iceberg.analytics.campaign_metrics (
+            campaign_id STRING,
+            campaign_type STRING,
+            subject_line STRING,
+            send_time TIMESTAMP,
+            list_id STRING,
+            is_sms BOOLEAN,
+            is_automated BOOLEAN,
+            total_sent INT,
+            total_delivered INT,
+            total_opens BIGINT,
+            unique_opens INT,
+            total_clicks BIGINT,
+            unique_clicks INT,
+            total_bounces INT,
+            hard_bounces BIGINT,
+            soft_bounces BIGINT,
+            total_unsubscribes INT,
+            sms_sent BIGINT,
+            sms_clicks BIGINT,
+            delivery_rate DECIMAL(5, 4),
+            open_rate DECIMAL(5, 4),
+            click_rate DECIMAL(5, 4),
+            click_to_open_rate DECIMAL(5, 4),
+            bounce_rate DECIMAL(5, 4),
+            unsubscribe_rate DECIMAL(5, 4),
+            sms_click_rate DECIMAL(5, 4),
+            engagement_score DECIMAL(7, 2),
+            performance_tier STRING,
+            _computed_at TIMESTAMP
+        )
+        USING iceberg
+        PARTITIONED BY (months(send_time))
+    """)
+
+    watermark = None
+    if mode == "incremental":
+        watermark = get_watermark(spark, "campaign_metrics")
+        if watermark:
+            logger.info(f"Incremental filter: _staged_at > {watermark}")
+
+    try:
+        campaigns_df = spark.table("iceberg.staging.stg_mailchimp_campaigns")
+    except Exception as e:
+        logger.warning(f"Could not read stg_mailchimp_campaigns: {e}")
+        return 0
+
+    if watermark and mode == "incremental":
+        campaigns_df = campaigns_df.filter(col("_staged_at") > watermark)
+
+    record_count = campaigns_df.count()
+    if record_count == 0:
+        logger.info("No new records to process")
+        return 0
+
+    logger.info(f"Processing {record_count} campaign records")
+
+    # Aggregate events per campaign
+    try:
+        events_df = spark.table("iceberg.staging.stg_mailchimp_events")
+        event_agg = events_df.groupBy("campaign_id").agg(
+            count("*").alias("total_events"),
+            spark_sum(when(col("action") == "open", 1).otherwise(0)).alias("event_opens"),
+            spark_sum(when(col("action") == "click", 1).otherwise(0)).alias("event_clicks"),
+            spark_sum(when(col("action") == "bounce", 1).otherwise(0)).alias("event_bounces"),
+            spark_sum(when(col("bounce_type") == "hard", 1).otherwise(0)).alias("hard_bounces"),
+            spark_sum(when(col("bounce_type") == "soft", 1).otherwise(0)).alias("soft_bounces"),
+            spark_sum(when(col("action") == "unsub", 1).otherwise(0)).alias("event_unsubs"),
+            spark_sum(when(col("action") == "sms_sent", 1).otherwise(0)).alias("sms_sent"),
+            spark_sum(when(col("action") == "sms_click", 1).otherwise(0)).alias("sms_clicks")
+        )
+    except Exception:
+        event_agg = None
+        logger.warning("Could not read stg_mailchimp_events for aggregation")
+
+    # Join campaigns with event aggregates
+    if event_agg is not None:
+        joined_df = campaigns_df.join(event_agg, "campaign_id", "left")
+    else:
+        joined_df = campaigns_df \
+            .withColumn("event_opens", lit(0).cast("bigint")) \
+            .withColumn("event_clicks", lit(0).cast("bigint")) \
+            .withColumn("event_bounces", lit(0).cast("bigint")) \
+            .withColumn("hard_bounces", lit(0).cast("bigint")) \
+            .withColumn("soft_bounces", lit(0).cast("bigint")) \
+            .withColumn("event_unsubs", lit(0).cast("bigint")) \
+            .withColumn("sms_sent", lit(0).cast("bigint")) \
+            .withColumn("sms_clicks", lit(0).cast("bigint"))
+
+    # Compute metrics
+    total_sent_col = coalesce(col("emails_sent"), lit(0))
+    total_bounces_col = coalesce(col("bounces"), lit(0))
+    total_delivered_col = total_sent_col - total_bounces_col
+    unique_opens_col = coalesce(col("unique_opens"), lit(0))
+    unique_clicks_col = coalesce(col("unique_clicks"), lit(0))
+
+    # Rate calculations with division-by-zero protection
+    delivery_rate = when(
+        total_sent_col > 0,
+        spark_round(total_delivered_col.cast("decimal(10,4)") / total_sent_col, 4)
+    ).otherwise(lit(None).cast("decimal(5,4)"))
+
+    open_rate = when(
+        total_sent_col > 0,
+        spark_round(unique_opens_col.cast("decimal(10,4)") / total_sent_col, 4)
+    ).otherwise(lit(None).cast("decimal(5,4)"))
+
+    click_rate = when(
+        total_sent_col > 0,
+        spark_round(unique_clicks_col.cast("decimal(10,4)") / total_sent_col, 4)
+    ).otherwise(lit(None).cast("decimal(5,4)"))
+
+    cto_rate = when(
+        unique_opens_col > 0,
+        spark_round(unique_clicks_col.cast("decimal(10,4)") / unique_opens_col, 4)
+    ).otherwise(lit(None).cast("decimal(5,4)"))
+
+    bounce_rate = when(
+        total_sent_col > 0,
+        spark_round(total_bounces_col.cast("decimal(10,4)") / total_sent_col, 4)
+    ).otherwise(lit(None).cast("decimal(5,4)"))
+
+    unsub_rate = when(
+        total_sent_col > 0,
+        spark_round(coalesce(col("unsubscribes"), lit(0)).cast("decimal(10,4)") / total_sent_col, 4)
+    ).otherwise(lit(None).cast("decimal(5,4)"))
+
+    sms_click_rate = when(
+        coalesce(col("sms_sent"), lit(0)) > 0,
+        spark_round(coalesce(col("sms_clicks"), lit(0)).cast("decimal(10,4)") / coalesce(col("sms_sent"), lit(1)), 4)
+    ).otherwise(lit(None).cast("decimal(5,4)"))
+
+    # Engagement score: rate-based, range approximately -75 to +100
+    engagement_score = spark_round(
+        (coalesce(open_rate, lit(0)) * 25 +
+         coalesce(click_rate, lit(0)) * 50 +
+         coalesce(cto_rate, lit(0)) * 25 -
+         coalesce(bounce_rate, lit(0)) * 25 -
+         coalesce(unsub_rate, lit(0)) * 50).cast("decimal(7,2)"),
+        2
+    )
+
+    # Performance tier from engagement score
+    performance_tier = when(engagement_score > 60, lit("excellent")) \
+        .when(engagement_score > 40, lit("good")) \
+        .when(engagement_score > 20, lit("average")) \
+        .otherwise(lit("poor"))
+
+    metrics_df = joined_df.select(
+        col("campaign_id"),
+        col("campaign_type"),
+        col("subject_line"),
+        col("send_time"),
+        col("list_id"),
+        col("is_sms"),
+        col("is_automated"),
+        total_sent_col.alias("total_sent"),
+        total_delivered_col.alias("total_delivered"),
+        coalesce(col("event_opens"), col("opens"), lit(0)).alias("total_opens"),
+        unique_opens_col.alias("unique_opens"),
+        coalesce(col("event_clicks"), col("clicks"), lit(0)).alias("total_clicks"),
+        unique_clicks_col.alias("unique_clicks"),
+        total_bounces_col.alias("total_bounces"),
+        coalesce(col("hard_bounces"), lit(0)).alias("hard_bounces"),
+        coalesce(col("soft_bounces"), lit(0)).alias("soft_bounces"),
+        coalesce(col("unsubscribes"), lit(0)).alias("total_unsubscribes"),
+        coalesce(col("sms_sent"), lit(0)).alias("sms_sent"),
+        coalesce(col("sms_clicks"), lit(0)).alias("sms_clicks"),
+        delivery_rate.alias("delivery_rate"),
+        open_rate.alias("open_rate"),
+        click_rate.alias("click_rate"),
+        cto_rate.alias("click_to_open_rate"),
+        bounce_rate.alias("bounce_rate"),
+        unsub_rate.alias("unsubscribe_rate"),
+        sms_click_rate.alias("sms_click_rate"),
+        engagement_score.alias("engagement_score"),
+        performance_tier.alias("performance_tier"),
+        current_timestamp().alias("_computed_at")
+    )
+
+    metrics_df.createOrReplaceTempView("new_campaign_metrics")
+
+    if mode == "full":
+        metrics_df.write \
+            .format("iceberg") \
+            .mode("overwrite") \
+            .saveAsTable("iceberg.analytics.campaign_metrics")
+    else:
+        spark.sql("""
+            MERGE INTO iceberg.analytics.campaign_metrics AS target
+            USING new_campaign_metrics AS source
+            ON target.campaign_id = source.campaign_id
+            WHEN MATCHED THEN UPDATE SET *
+            WHEN NOT MATCHED THEN INSERT *
+        """)
+
+    logger.info(f"Successfully computed campaign_metrics for {record_count} campaigns")
+    update_watermark(spark, "campaign_metrics", record_count)
+    return record_count
+
+
 # Mapping of table names to compute functions
 ANALYTICS_FUNCTIONS = {
     "customer_metrics": compute_customer_metrics,
     "order_summary": compute_order_summary,
     "payment_metrics": compute_payment_metrics,
+    "campaign_metrics": compute_campaign_metrics,
 }
 
 

@@ -65,11 +65,27 @@ CREATE TABLE IF NOT EXISTS marts.customer_360 (
     has_shopify_profile         BOOLEAN         COMMENT 'Exists in Shopify',
     has_stripe_profile          BOOLEAN         COMMENT 'Exists in Stripe',
     has_hubspot_profile         BOOLEAN         COMMENT 'Exists in HubSpot',
+    has_mailchimp_profile       BOOLEAN         COMMENT 'Exists in Mailchimp',
 
     -- Source IDs for debugging
     shopify_customer_id         BIGINT          COMMENT 'Shopify ID',
     stripe_customer_id          STRING          COMMENT 'Stripe ID',
     hubspot_contact_id          STRING          COMMENT 'HubSpot ID',
+    mailchimp_subscriber_id     STRING          COMMENT 'Mailchimp subscriber ID',
+
+    -- Mailchimp engagement
+    mailchimp_status            STRING          COMMENT 'Mailchimp subscription status',
+    email_open_rate             DECIMAL(5, 4)   COMMENT 'Average email open rate',
+    email_click_rate            DECIMAL(5, 4)   COMMENT 'Average email click rate',
+    total_emails_received       BIGINT          COMMENT 'Total emails received',
+    total_emails_opened         BIGINT          COMMENT 'Total emails opened',
+    total_emails_clicked        BIGINT          COMMENT 'Total emails clicked',
+    total_sms_received          BIGINT          COMMENT 'Total SMS received',
+    total_sms_clicked           BIGINT          COMMENT 'Total SMS clicked',
+    has_sms                     BOOLEAN         COMMENT 'Has active SMS subscription',
+    last_email_open_date        DATE            COMMENT 'Last email open date',
+    last_email_click_date       DATE            COMMENT 'Last email click date',
+    days_since_last_email       INT             COMMENT 'Days since last email open',
 
     -- Cohorts for analysis
     signup_cohort               STRING          COMMENT 'YYYY-MM signup cohort',

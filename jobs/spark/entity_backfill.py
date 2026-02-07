@@ -226,7 +226,28 @@ def get_all_staging_customers(
         WHERE 1=1 {date_filter}
     """)
 
-    all_customers = shopify.union(hubspot).union(stripe).filter(
+    # Mailchimp subscribers
+    mailchimp = spark.sql(f"""
+        SELECT
+            'mailchimp_subscribers' AS source,
+            CAST(subscriber_id AS STRING) AS source_id,
+            email_normalized AS email,
+            first_name,
+            last_name,
+            full_name,
+            phone_normalized AS phone,
+            CAST(NULL AS STRING) AS address,
+            CAST(NULL AS STRING) AS city,
+            CAST(NULL AS STRING) AS state,
+            CAST(NULL AS STRING) AS zip,
+            CAST(NULL AS STRING) AS country,
+            signup_timestamp AS created_at,
+            _staged_at
+        FROM iceberg.staging.stg_mailchimp_subscribers
+        WHERE 1=1 {date_filter}
+    """)
+
+    all_customers = shopify.union(hubspot).union(stripe).union(mailchimp).filter(
         # Filter out records without a valid source_id
         col("source_id").isNotNull()
     )
@@ -435,9 +456,9 @@ def rebuild_blocking_index(spark: SparkSession, dry_run: bool):
             ei.unified_id,
             ei.source,
             ei.source_id,
-            LOWER(TRIM(COALESCE(hc.email, sc.email, stc.email))) AS normalized_email,
-            REGEXP_REPLACE(COALESCE(hc.phone, hc.mobile_phone, sc.phone, stc.phone), '[^0-9+]', '') AS normalized_phone,
-            COALESCE(hc.last_name, sc.last_name, stc.last_name) AS last_name,
+            LOWER(TRIM(COALESCE(hc.email, sc.email, stc.email, mc.email_normalized))) AS normalized_email,
+            REGEXP_REPLACE(COALESCE(hc.phone, hc.mobile_phone, sc.phone, stc.phone, mc.phone_normalized), '[^0-9+]', '') AS normalized_phone,
+            COALESCE(hc.last_name, sc.last_name, stc.last_name, mc.last_name) AS last_name,
             COALESCE(hc.zip, sc.zip, stc.postal_code) AS zip
         FROM iceberg.semantic.entity_index ei
         LEFT JOIN iceberg.staging.stg_shopify_customers sc
@@ -449,6 +470,9 @@ def rebuild_blocking_index(spark: SparkSession, dry_run: bool):
         LEFT JOIN iceberg.staging.stg_stripe_customers stc
             ON ei.source = 'stripe_customers'
             AND ei.source_id = stc.customer_id
+        LEFT JOIN iceberg.staging.stg_mailchimp_subscribers mc
+            ON ei.source = 'mailchimp_subscribers'
+            AND ei.source_id = mc.subscriber_id
         WHERE ei.entity_type = 'customer'
           AND ei.linked_to_unified_id IS NULL
     """)
