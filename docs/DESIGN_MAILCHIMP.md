@@ -49,7 +49,7 @@ These columns appear in the Flink source table definitions, raw table schemas, a
 
 ```
 campaign_id        STRING   -- Mailchimp campaign ID (10-char hex)
-type               STRING   -- regular, plaintext, absplit, rss, variate, automation, sms
+campaign_type      STRING   -- regular, plaintext, absplit, rss, variate, automation, sms
 status             STRING   -- save, paused, schedule, sending, sent
 list_id            STRING   -- Audience/list ID
 subject_line       STRING

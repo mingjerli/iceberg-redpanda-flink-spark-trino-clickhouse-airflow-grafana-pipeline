@@ -71,6 +71,16 @@ class Settings(BaseSettings):
         description="Enable HubSpot webhook endpoints"
     )
 
+    # Mailchimp webhook settings
+    mailchimp_webhook_secret: Optional[str] = Field(
+        default=None,
+        description="Mailchimp webhook shared secret (query parameter validation)"
+    )
+    mailchimp_enabled: bool = Field(
+        default=True,
+        description="Enable Mailchimp webhook endpoints"
+    )
+
     # Signature validation
     skip_signature_validation: bool = Field(
         default=False,
@@ -104,7 +114,7 @@ def get_topic_name(source: str, entity: str) -> str:
     Build topic name from source and entity.
 
     Args:
-        source: Data source (shopify, stripe, hubspot)
+        source: Data source (shopify, stripe, hubspot, mailchimp)
         entity: Entity type (orders, customers, etc.)
 
     Returns:

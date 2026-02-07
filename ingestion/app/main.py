@@ -1,8 +1,8 @@
 """
 Iceberg Incremental Demo - Ingestion API
 
-FastAPI application for receiving webhooks from Shopify, Stripe, and HubSpot,
-validating signatures, and publishing events to Redpanda.
+FastAPI application for receiving webhooks from Shopify, Stripe, HubSpot, and
+Mailchimp, validating signatures, and publishing events to Redpanda.
 """
 
 import logging
@@ -16,7 +16,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from .config import get_settings
 from .producers.redpanda import get_producer, shutdown_producer
-from .webhooks import shopify_router, stripe_router, hubspot_router
+from .webhooks import shopify_router, stripe_router, hubspot_router, mailchimp_router
 
 # Configure logging
 logging.basicConfig(
@@ -65,8 +65,9 @@ app = FastAPI(
     - Shopify (orders, customers, products)
     - Stripe (customers, charges, payments)
     - HubSpot (contacts, companies, deals)
+    - Mailchimp (campaigns, events, subscribers)
 
-    Events are validated (HMAC signatures) and published to Redpanda topics.
+    Events are validated (HMAC/secret signatures) and published to Redpanda topics.
     """,
     version="0.1.0",
     lifespan=lifespan,
@@ -94,6 +95,8 @@ if settings.stripe_enabled:
     app.include_router(stripe_router, prefix="/webhooks")
 if settings.hubspot_enabled:
     app.include_router(hubspot_router, prefix="/webhooks")
+if settings.mailchimp_enabled:
+    app.include_router(mailchimp_router, prefix="/webhooks")
 
 
 @app.get("/health")
@@ -141,6 +144,7 @@ async def root() -> Dict[str, Any]:
             "shopify_products": "/webhooks/shopify/products" if settings.shopify_enabled else None,
             "stripe_webhook": "/webhooks/stripe/webhook" if settings.stripe_enabled else None,
             "hubspot_webhook": "/webhooks/hubspot/webhook" if settings.hubspot_enabled else None,
+            "mailchimp_webhook": "/webhooks/mailchimp/webhook" if settings.mailchimp_enabled else None,
             "health": "/health",
             "ready": "/ready",
         },

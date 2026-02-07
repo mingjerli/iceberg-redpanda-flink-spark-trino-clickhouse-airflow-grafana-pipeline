@@ -5,6 +5,7 @@ Each vendor has a slightly different signature scheme:
 - Shopify: HMAC-SHA256, base64 encoded, in X-Shopify-Hmac-Sha256 header
 - Stripe: HMAC-SHA256 with timestamp, in Stripe-Signature header
 - HubSpot: HMAC-SHA256 v3 or v2, in X-HubSpot-Signature-v3 header
+- Mailchimp: Shared secret via URL query parameter (NOT HMAC)
 """
 
 import hashlib
@@ -185,6 +186,33 @@ def compute_shopify_signature(payload: bytes, secret: str) -> str:
         hashlib.sha256
     ).digest()
     return base64.b64encode(computed).decode("utf-8")
+
+
+def validate_mailchimp_signature(secret_param: str, expected_secret: str) -> bool:
+    """
+    Validate Mailchimp webhook by comparing the query parameter secret
+    against the configured secret.
+
+    This is NOT HMAC — Mailchimp uses a shared secret in the URL query
+    parameter, not a request body signature. In production, this must
+    be over HTTPS to avoid leaking the secret. Any reverse proxy or
+    load balancer must redact query parameters from access logs.
+
+    Uses hmac.compare_digest for constant-time comparison to prevent
+    timing attacks.
+
+    Args:
+        secret_param: Secret from the URL query parameter
+        expected_secret: Configured webhook secret
+
+    Returns:
+        True if secrets match, False otherwise
+    """
+    try:
+        return hmac.compare_digest(secret_param, expected_secret)
+    except Exception as e:
+        logger.warning(f"Mailchimp signature validation failed: {e}")
+        return False
 
 
 def compute_stripe_signature(payload: bytes, secret: str, timestamp: int) -> str:

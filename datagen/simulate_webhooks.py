@@ -3,7 +3,7 @@
 Webhook Simulator for Iceberg Incremental Demo
 
 Sends generated mock data as webhook events to the ingestion API.
-This simulates real webhook traffic from Shopify, Stripe, and HubSpot.
+This simulates real webhook traffic from Shopify, Stripe, HubSpot, and Mailchimp.
 
 Usage:
     # Send 10 Shopify orders (default)
@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from providers.shopify_provider import ShopifyProvider
 from providers.stripe_provider import StripeProvider
 from providers.hubspot_provider import HubSpotProvider
+from providers.mailchimp_provider import MailchimpProvider
 
 
 class WebhookSimulator:
@@ -59,6 +60,7 @@ class WebhookSimulator:
         self.shopify = ShopifyProvider(seed=seed)
         self.stripe = StripeProvider(seed=seed)
         self.hubspot = HubSpotProvider(seed=seed)
+        self.mailchimp = MailchimpProvider(seed=seed)
 
         # Shared customer pool for cross-source consistency
         self._customers = []
@@ -198,6 +200,51 @@ class WebhookSimulator:
 
         return response.status_code == 200
 
+    def send_mailchimp_subscriber(self) -> bool:
+        """Generate and send a Mailchimp subscriber webhook."""
+        subscriber = self.mailchimp.generate_subscriber(shared=self._get_shared_customer())
+
+        response = requests.post(
+            f"{self.api_base_url}/webhooks/mailchimp/webhook",
+            params={"secret": os.getenv("INGESTION_MAILCHIMP_WEBHOOK_SECRET", "")},
+            json=subscriber,
+            headers={
+                "Content-Type": "application/json",
+            },
+        )
+
+        return response.status_code == 200
+
+    def send_mailchimp_event(self) -> bool:
+        """Generate and send a Mailchimp engagement event webhook."""
+        event = self.mailchimp.generate_event()
+
+        response = requests.post(
+            f"{self.api_base_url}/webhooks/mailchimp/webhook",
+            params={"secret": os.getenv("INGESTION_MAILCHIMP_WEBHOOK_SECRET", "")},
+            json=event,
+            headers={
+                "Content-Type": "application/json",
+            },
+        )
+
+        return response.status_code == 200
+
+    def send_mailchimp_campaign(self) -> bool:
+        """Generate and send a Mailchimp campaign webhook."""
+        campaign = self.mailchimp.generate_campaign()
+
+        response = requests.post(
+            f"{self.api_base_url}/webhooks/mailchimp/webhook",
+            params={"secret": os.getenv("INGESTION_MAILCHIMP_WEBHOOK_SECRET", "")},
+            json=campaign,
+            headers={
+                "Content-Type": "application/json",
+            },
+        )
+
+        return response.status_code == 200
+
     def simulate(
         self,
         source: str = "all",
@@ -237,6 +284,13 @@ class WebhookSimulator:
         if source in ("all", "hubspot"):
             if entity is None or entity == "contacts":
                 senders.append(("hubspot_contacts", self.send_hubspot_contact))
+        if source in ("all", "mailchimp"):
+            if entity is None or entity == "subscribers":
+                senders.append(("mailchimp_subscribers", self.send_mailchimp_subscriber))
+            if entity is None or entity == "events":
+                senders.append(("mailchimp_events", self.send_mailchimp_event))
+            if entity is None or entity == "campaigns":
+                senders.append(("mailchimp_campaigns", self.send_mailchimp_campaign))
 
         if not senders:
             print(f"No matching senders for source={source}, entity={entity}")
@@ -271,14 +325,14 @@ class WebhookSimulator:
 )
 @click.option(
     "--source",
-    type=click.Choice(["shopify", "stripe", "hubspot", "all"]),
+    type=click.Choice(["shopify", "stripe", "hubspot", "mailchimp", "all"]),
     default="all",
     help="Data source to simulate",
 )
 @click.option(
     "--entity",
     default=None,
-    help="Specific entity type (orders, customers, charges, contacts)",
+    help="Specific entity type (orders, customers, charges, contacts, subscribers, events, campaigns)",
 )
 @click.option(
     "--count",
