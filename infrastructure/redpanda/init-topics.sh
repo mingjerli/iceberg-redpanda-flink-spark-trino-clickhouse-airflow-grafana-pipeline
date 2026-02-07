@@ -77,6 +77,13 @@ create_topic "hubspot.companies" 3
 create_topic "hubspot.deals" 3
 
 # -----------------------------------------------------------------------------
+# Mailchimp Topics
+# -----------------------------------------------------------------------------
+create_topic "mailchimp.campaigns" 3
+create_topic "mailchimp.events" 3
+create_topic "mailchimp.subscribers" 3
+
+# -----------------------------------------------------------------------------
 # Internal Topics (for dead letter queue, etc.)
 # -----------------------------------------------------------------------------
 create_topic "dlq.ingestion-errors" 1
