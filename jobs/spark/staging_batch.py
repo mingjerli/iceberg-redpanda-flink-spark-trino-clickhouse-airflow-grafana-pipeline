@@ -26,19 +26,25 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from pyspark.sql import SparkSession
+from pyspark.sql import Window
 from pyspark.sql.functions import (
     col,
     coalesce,
     concat,
+    current_date,
     current_timestamp,
+    datediff,
     expr,
     get_json_object,
     length,
     lit,
     lower,
+    regexp_replace,
     round as spark_round,
+    row_number,
     size,
     split,
+    to_date,
     trim,
     upper,
     when,
@@ -833,6 +839,326 @@ def stage_hubspot_contacts(spark: SparkSession, mode: str = "incremental"):
     return record_count
 
 
+def stage_mailchimp_campaigns(spark: SparkSession, mode: str = "incremental"):
+    """Transform raw.mailchimp_campaigns to staging.stg_mailchimp_campaigns."""
+    logger.info(f"Processing mailchimp_campaigns in {mode} mode")
+
+    spark.sql("""
+        CREATE TABLE IF NOT EXISTS iceberg.staging.stg_mailchimp_campaigns (
+            _raw_id STRING,
+            campaign_id STRING,
+            campaign_type STRING,
+            status STRING,
+            list_id STRING,
+            subject_line STRING,
+            preview_text STRING,
+            from_name STRING,
+            from_email STRING,
+            reply_to STRING,
+            send_time TIMESTAMP,
+            content_type STRING,
+            emails_sent INT,
+            opens INT,
+            unique_opens INT,
+            clicks INT,
+            unique_clicks INT,
+            unsubscribes INT,
+            bounces INT,
+            open_rate DECIMAL(5, 4),
+            click_rate DECIMAL(5, 4),
+            click_to_open_rate DECIMAL(5, 4),
+            is_sms BOOLEAN,
+            is_automated BOOLEAN,
+            settings STRING,
+            tracking STRING,
+            _webhook_received_at TIMESTAMP,
+            _webhook_event_type STRING,
+            _loaded_at TIMESTAMP,
+            _staged_at TIMESTAMP
+        )
+        USING iceberg
+        PARTITIONED BY (months(send_time))
+    """)
+
+    raw_df = spark.table("iceberg.raw.mailchimp_campaigns")
+
+    if mode == "incremental":
+        watermark = get_watermark(spark, "stg_mailchimp_campaigns")
+        if watermark:
+            raw_df = raw_df.filter(col("_loaded_at") > watermark)
+            logger.info(f"Incremental filter: _loaded_at > {watermark}")
+
+    record_count = raw_df.count()
+    if record_count == 0:
+        logger.info("No new records to process")
+        return 0
+
+    logger.info(f"Processing {record_count} records")
+
+    staged_df = raw_df.select(
+        col("campaign_id").alias("_raw_id"),
+        col("campaign_id"),
+        col("campaign_type"),
+        col("status"),
+        col("list_id"),
+        col("subject_line"),
+        col("preview_text"),
+        col("from_name"),
+        lower(trim(col("from_email"))).alias("from_email"),
+        lower(trim(col("reply_to"))).alias("reply_to"),
+        col("send_time"),
+        col("content_type"),
+        col("emails_sent"),
+        col("opens"),
+        col("unique_opens"),
+        col("clicks"),
+        col("unique_clicks"),
+        col("unsubscribes"),
+        col("bounces"),
+        col("open_rate"),
+        col("click_rate"),
+        # click_to_open_rate = unique_clicks / NULLIF(unique_opens, 0)
+        when(col("unique_opens") > 0,
+             spark_round((col("unique_clicks").cast("decimal(10,4)") / col("unique_opens")), 4))
+        .otherwise(lit(None).cast("decimal(5,4)"))
+        .alias("click_to_open_rate"),
+        (col("campaign_type") == "sms").alias("is_sms"),
+        (col("campaign_type") == "automation").alias("is_automated"),
+        col("settings"),
+        col("tracking"),
+        col("_webhook_received_at"),
+        col("_webhook_event_type"),
+        col("_loaded_at"),
+        current_timestamp().alias("_staged_at"),
+    )
+
+    staged_df.write \
+        .format("iceberg") \
+        .mode("append") \
+        .saveAsTable("iceberg.staging.stg_mailchimp_campaigns")
+
+    logger.info(f"Successfully staged {record_count} mailchimp_campaigns records")
+    update_watermark(spark, "stg_mailchimp_campaigns", record_count)
+    return record_count
+
+
+def stage_mailchimp_events(spark: SparkSession, mode: str = "incremental"):
+    """Transform raw.mailchimp_events to staging.stg_mailchimp_events."""
+    logger.info(f"Processing mailchimp_events in {mode} mode")
+
+    spark.sql("""
+        CREATE TABLE IF NOT EXISTS iceberg.staging.stg_mailchimp_events (
+            _raw_id STRING,
+            event_id STRING,
+            campaign_id STRING,
+            email_id STRING,
+            email_address STRING,
+            email_normalized STRING,
+            action STRING,
+            event_timestamp TIMESTAMP,
+            event_date DATE,
+            url STRING,
+            ip STRING,
+            user_agent STRING,
+            location STRING,
+            location_country STRING,
+            location_region STRING,
+            bounce_type STRING,
+            list_id STRING,
+            is_sms_event BOOLEAN,
+            is_positive_engagement BOOLEAN,
+            is_negative_event BOOLEAN,
+            _webhook_received_at TIMESTAMP,
+            _webhook_event_type STRING,
+            _loaded_at TIMESTAMP,
+            _staged_at TIMESTAMP
+        )
+        USING iceberg
+        PARTITIONED BY (months(event_timestamp))
+    """)
+
+    raw_df = spark.table("iceberg.raw.mailchimp_events")
+
+    if mode == "incremental":
+        watermark = get_watermark(spark, "stg_mailchimp_events")
+        if watermark:
+            raw_df = raw_df.filter(col("_loaded_at") > watermark)
+            logger.info(f"Incremental filter: _loaded_at > {watermark}")
+
+    record_count = raw_df.count()
+    if record_count == 0:
+        logger.info("No new records to process")
+        return 0
+
+    logger.info(f"Processing {record_count} records")
+
+    staged_df = raw_df.select(
+        col("event_id").alias("_raw_id"),
+        col("event_id"),
+        col("campaign_id"),
+        col("email_id"),
+        col("email_address"),
+        lower(trim(col("email_address"))).alias("email_normalized"),
+        col("action"),
+        col("event_timestamp"),
+        to_date(col("event_timestamp")).alias("event_date"),
+        col("url"),
+        col("ip"),
+        col("user_agent"),
+        col("location"),
+        get_json_object(col("location"), "$.country_code").alias("location_country"),
+        get_json_object(col("location"), "$.region").alias("location_region"),
+        col("bounce_type"),
+        col("list_id"),
+        col("action").isin("sms_sent", "sms_click").alias("is_sms_event"),
+        col("action").isin("open", "click", "sms_click").alias("is_positive_engagement"),
+        col("action").isin("bounce", "unsub", "abuse").alias("is_negative_event"),
+        col("_webhook_received_at"),
+        col("_webhook_event_type"),
+        col("_loaded_at"),
+        current_timestamp().alias("_staged_at"),
+    )
+
+    staged_df.write \
+        .format("iceberg") \
+        .mode("append") \
+        .saveAsTable("iceberg.staging.stg_mailchimp_events")
+
+    logger.info(f"Successfully staged {record_count} mailchimp_events records")
+    update_watermark(spark, "stg_mailchimp_events", record_count)
+    return record_count
+
+
+def stage_mailchimp_subscribers(spark: SparkSession, mode: str = "incremental"):
+    """Transform raw.mailchimp_subscribers to staging.stg_mailchimp_subscribers."""
+    logger.info(f"Processing mailchimp_subscribers in {mode} mode")
+
+    spark.sql("""
+        CREATE TABLE IF NOT EXISTS iceberg.staging.stg_mailchimp_subscribers (
+            _raw_id STRING,
+            subscriber_id STRING,
+            email_address STRING,
+            email_normalized STRING,
+            email_type STRING,
+            status STRING,
+            first_name STRING,
+            last_name STRING,
+            full_name STRING,
+            phone STRING,
+            phone_normalized STRING,
+            merge_fields STRING,
+            stats STRING,
+            avg_open_rate DECIMAL(5, 4),
+            avg_click_rate DECIMAL(5, 4),
+            list_id STRING,
+            tags STRING,
+            ip_signup STRING,
+            signup_timestamp TIMESTAMP,
+            ip_opt STRING,
+            timestamp_opt TIMESTAMP,
+            last_changed TIMESTAMP,
+            language STRING,
+            vip BOOLEAN,
+            source STRING,
+            sms_status STRING,
+            has_sms BOOLEAN,
+            is_active BOOLEAN,
+            days_since_signup INT,
+            _webhook_received_at TIMESTAMP,
+            _webhook_event_type STRING,
+            _loaded_at TIMESTAMP,
+            _staged_at TIMESTAMP
+        )
+        USING iceberg
+        PARTITIONED BY (months(signup_timestamp))
+    """)
+
+    raw_df = spark.table("iceberg.raw.mailchimp_subscribers")
+
+    if mode == "incremental":
+        watermark = get_watermark(spark, "stg_mailchimp_subscribers")
+        if watermark:
+            raw_df = raw_df.filter(col("_loaded_at") > watermark)
+            logger.info(f"Incremental filter: _loaded_at > {watermark}")
+
+    record_count = raw_df.count()
+    if record_count == 0:
+        logger.info("No new records to process")
+        return 0
+
+    logger.info(f"Processing {record_count} records")
+
+    # Dedup: keep latest record per subscriber_id within the batch.
+    # Mailchimp webhooks may fire multiple events for the same subscriber
+    # (e.g., profile update + tag change) in a single batch window.
+    window = Window.partitionBy("subscriber_id").orderBy(col("_loaded_at").desc())
+    deduped_df = (
+        raw_df
+        .withColumn("_rn", row_number().over(window))
+        .where(col("_rn") == 1)
+        .drop("_rn")
+    )
+
+    # Extract fields from merge_fields JSON
+    first_name_col = trim(get_json_object(col("merge_fields"), "$.FNAME"))
+    last_name_col = trim(get_json_object(col("merge_fields"), "$.LNAME"))
+    phone_col = trim(get_json_object(col("merge_fields"), "$.PHONE"))
+
+    staged_df = deduped_df.select(
+        col("subscriber_id").alias("_raw_id"),
+        col("subscriber_id"),
+        col("email_address"),
+        lower(trim(col("email_address"))).alias("email_normalized"),
+        col("email_type"),
+        col("status"),
+        first_name_col.alias("first_name"),
+        last_name_col.alias("last_name"),
+        trim(concat(
+            coalesce(first_name_col, lit("")),
+            when(first_name_col.isNotNull() & last_name_col.isNotNull(), lit(" ")).otherwise(lit("")),
+            coalesce(last_name_col, lit(""))
+        )).alias("full_name"),
+        coalesce(col("phone"), phone_col).alias("phone"),
+        # phone_normalized: digits only for entity resolution matching
+        regexp_replace(
+            coalesce(col("phone"), phone_col, lit("")),
+            "[^0-9+]", ""
+        ).alias("phone_normalized"),
+        col("merge_fields"),
+        col("stats"),
+        get_json_object(col("stats"), "$.avg_open_rate").cast("decimal(5,4)").alias("avg_open_rate"),
+        get_json_object(col("stats"), "$.avg_click_rate").cast("decimal(5,4)").alias("avg_click_rate"),
+        col("list_id"),
+        col("tags"),
+        col("ip_signup"),
+        col("timestamp_signup").alias("signup_timestamp"),
+        col("ip_opt"),
+        col("timestamp_opt"),
+        col("last_changed"),
+        col("language"),
+        col("vip"),
+        col("source"),
+        col("sms_status"),
+        (col("phone").isNotNull() & (col("sms_status") == "subscribed")).alias("has_sms"),
+        (col("status") == "subscribed").alias("is_active"),
+        datediff(current_date(), col("timestamp_signup")).alias("days_since_signup"),
+        col("_webhook_received_at"),
+        col("_webhook_event_type"),
+        col("_loaded_at"),
+        current_timestamp().alias("_staged_at"),
+    )
+
+    staged_df.write \
+        .format("iceberg") \
+        .mode("append") \
+        .saveAsTable("iceberg.staging.stg_mailchimp_subscribers")
+
+    deduped_count = staged_df.count()
+    logger.info(f"Successfully staged {deduped_count} mailchimp_subscribers records (from {record_count} raw)")
+    update_watermark(spark, "stg_mailchimp_subscribers", deduped_count)
+    return deduped_count
+
+
 # Mapping of table names to staging functions
 STAGING_FUNCTIONS = {
     "shopify_orders": stage_shopify_orders,
@@ -840,6 +1166,9 @@ STAGING_FUNCTIONS = {
     "stripe_charges": stage_stripe_charges,
     "stripe_customers": stage_stripe_customers,
     "hubspot_contacts": stage_hubspot_contacts,
+    "mailchimp_campaigns": stage_mailchimp_campaigns,
+    "mailchimp_events": stage_mailchimp_events,
+    "mailchimp_subscribers": stage_mailchimp_subscribers,
 }
 
 
