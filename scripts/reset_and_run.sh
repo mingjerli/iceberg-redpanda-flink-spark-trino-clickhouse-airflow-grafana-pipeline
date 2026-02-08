@@ -401,6 +401,9 @@ generate_mock_data() {
         --stripe-customers "$STRIPE_CUSTOMERS" \
         --stripe-charges "$STRIPE_CHARGES" \
         --hubspot-contacts "$HUBSPOT_CONTACTS" \
+        --mailchimp-subscribers "$MAILCHIMP_SUBSCRIBERS" \
+        --mailchimp-campaigns "$MAILCHIMP_CAMPAIGNS" \
+        --mailchimp-events "$MAILCHIMP_EVENTS" \
         --seed 42 2>&1 | grep -E "Posted|Total|Summary" || true
 
     log_success "Mock data generated"
