@@ -1,0 +1,96 @@
+{
+  "source": "mailchimp",
+  "api_version": "3.0",
+  "api_type": "Webhook",
+  "documentation": "https://mailchimp.com/developer/transactional/docs/webhooks/",
+  "note": "Mailchimp sends webhooks for subscriber and campaign activity. In production, payloads are form-encoded; this pipeline uses JSON for consistency with other sources.",
+  "tables": {
+    "campaigns": {
+      "description": "Campaign metadata including email and SMS campaigns",
+      "webhook_event": "campaign",
+      "columns": {
+        "campaign_id": {"type": "STRING", "description": "Mailchimp campaign ID (10-char hex)", "pii": false, "example": "000000000a"},
+        "campaign_type": {"type": "STRING", "description": "Campaign type", "pii": false, "enum": ["regular", "plaintext", "absplit", "rss", "variate", "automation", "sms"]},
+        "status": {"type": "STRING", "description": "Campaign status", "pii": false, "enum": ["save", "paused", "schedule", "sending", "sent"]},
+        "list_id": {"type": "STRING", "description": "Audience/list ID (10-char alphanumeric)", "pii": false},
+        "subject_line": {"type": "STRING", "description": "Email subject line", "pii": false},
+        "preview_text": {"type": "STRING", "description": "Preview text shown in inbox", "pii": false},
+        "from_name": {"type": "STRING", "description": "Sender display name", "pii": false},
+        "from_email": {"type": "STRING", "description": "Sender email address", "pii": false},
+        "reply_to": {"type": "STRING", "description": "Reply-to email address", "pii": false},
+        "send_time": {"type": "TIMESTAMP", "description": "Campaign send time (ISO8601)", "pii": false},
+        "content_type": {"type": "STRING", "description": "Content type", "pii": false, "enum": ["template", "html", "url", "multichannel"]},
+        "emails_sent": {"type": "INT64", "description": "Total emails sent", "pii": false},
+        "opens": {"type": "INT64", "description": "Total opens (including repeats)", "pii": false},
+        "unique_opens": {"type": "INT64", "description": "Unique opens", "pii": false},
+        "clicks": {"type": "INT64", "description": "Total clicks (including repeats)", "pii": false},
+        "unique_clicks": {"type": "INT64", "description": "Unique clicks", "pii": false},
+        "unsubscribes": {"type": "INT64", "description": "Unsubscribes triggered by campaign", "pii": false},
+        "bounces": {"type": "INT64", "description": "Total bounces", "pii": false},
+        "open_rate": {"type": "DOUBLE", "description": "Unique opens / emails sent", "pii": false},
+        "click_rate": {"type": "DOUBLE", "description": "Unique clicks / emails sent", "pii": false},
+        "settings": {"type": "JSON", "description": "Additional campaign settings JSON", "pii": false},
+        "tracking": {"type": "JSON", "description": "Tracking configuration JSON", "pii": false},
+        "_webhook_received_at": {"type": "TIMESTAMP", "description": "When webhook was received by ingestion API", "pii": false},
+        "_webhook_event_type": {"type": "STRING", "description": "Mailchimp webhook type field", "pii": false}
+      }
+    },
+    "events": {
+      "description": "Campaign engagement events (sends, opens, clicks, bounces, unsubscribes, SMS)",
+      "webhook_event": "send|open|click|bounce|unsub|abuse|sms_sent|sms_click",
+      "columns": {
+        "event_id": {"type": "STRING", "description": "Unique event ID", "pii": false, "example": "evt_000000000001"},
+        "campaign_id": {"type": "STRING", "description": "Associated campaign ID", "pii": false},
+        "email_id": {"type": "STRING", "description": "Unique member-campaign combination ID", "pii": false},
+        "email_address": {"type": "STRING", "description": "Subscriber email address", "pii": true},
+        "action": {"type": "STRING", "description": "Event action type", "pii": false, "enum": ["sent", "open", "click", "bounce", "unsub", "abuse", "sms_sent", "sms_click"]},
+        "timestamp": {"type": "TIMESTAMP", "description": "When event occurred (ISO8601)", "pii": false},
+        "url": {"type": "STRING", "description": "Clicked URL (for click/sms_click events)", "pii": false, "nullable": true},
+        "ip": {"type": "STRING", "description": "IP address (for open/click events)", "pii": true, "nullable": true},
+        "user_agent": {"type": "STRING", "description": "Browser/client user agent (for open/click events)", "pii": false, "nullable": true},
+        "location": {"type": "JSON", "description": "Geolocation JSON (latitude, longitude, country_code, region)", "pii": false, "nullable": true},
+        "bounce_type": {"type": "STRING", "description": "Bounce type (for bounce events)", "pii": false, "nullable": true, "enum": ["hard", "soft"]},
+        "list_id": {"type": "STRING", "description": "Audience/list ID", "pii": false},
+        "_webhook_received_at": {"type": "TIMESTAMP", "description": "When webhook was received by ingestion API", "pii": false},
+        "_webhook_event_type": {"type": "STRING", "description": "Mailchimp webhook type field", "pii": false}
+      }
+    },
+    "subscribers": {
+      "description": "List member profiles and subscription status",
+      "webhook_event": "subscribe|unsubscribe|profile|upemail|cleaned",
+      "columns": {
+        "subscriber_id": {"type": "STRING", "description": "MD5 hash of lowercased email (Mailchimp convention)", "pii": false, "example": "d41d8cd98f00b204e9800998ecf8427e"},
+        "email_address": {"type": "STRING", "description": "Subscriber email address", "pii": true},
+        "email_type": {"type": "STRING", "description": "Preferred email format", "pii": false, "enum": ["html", "text"]},
+        "status": {"type": "STRING", "description": "Subscription status", "pii": false, "enum": ["subscribed", "unsubscribed", "cleaned", "pending", "transactional"]},
+        "merge_fields": {"type": "JSON", "description": "Merge fields JSON (FNAME, LNAME, PHONE, etc.)", "pii": true},
+        "stats": {"type": "JSON", "description": "Subscriber engagement stats JSON (avg_open_rate, avg_click_rate)", "pii": false},
+        "list_id": {"type": "STRING", "description": "Audience/list ID", "pii": false},
+        "tags": {"type": "JSON", "description": "Array of tag objects with id and name", "pii": false},
+        "ip_signup": {"type": "STRING", "description": "IP address at signup", "pii": true, "nullable": true},
+        "timestamp_signup": {"type": "TIMESTAMP", "description": "Signup timestamp (ISO8601)", "pii": false},
+        "ip_opt": {"type": "STRING", "description": "IP address at opt-in confirmation", "pii": true, "nullable": true},
+        "timestamp_opt": {"type": "TIMESTAMP", "description": "Opt-in confirmation timestamp (ISO8601)", "pii": false},
+        "last_changed": {"type": "TIMESTAMP", "description": "Last profile change timestamp (ISO8601)", "pii": false},
+        "language": {"type": "STRING", "description": "Subscriber language preference (ISO 639-1)", "pii": false},
+        "vip": {"type": "BOOLEAN", "description": "VIP status flag", "pii": false},
+        "source": {"type": "STRING", "description": "How subscriber was added", "pii": false, "enum": ["API", "import", "popup", "landing_page"]},
+        "phone": {"type": "STRING", "description": "SMS-enabled phone number (E.164 format)", "pii": true, "nullable": true},
+        "sms_status": {"type": "STRING", "description": "SMS subscription status", "pii": false, "enum": ["subscribed", "unsubscribed", "non_subscribed"]},
+        "_webhook_received_at": {"type": "TIMESTAMP", "description": "When webhook was received by ingestion API", "pii": false},
+        "_webhook_event_type": {"type": "STRING", "description": "Mailchimp webhook type field", "pii": false}
+      }
+    }
+  },
+  "webhook_payload": {
+    "description": "Mailchimp webhook payload structure",
+    "fields": {
+      "type": "STRING (subscribe, unsubscribe, profile, upemail, cleaned, campaign, send, open, click, bounce, unsub, abuse)",
+      "fired_at": "TIMESTAMP (when event occurred)",
+      "data": "OBJECT (event-specific data, varies by type)",
+      "data.email": "STRING (subscriber email, for subscriber events)",
+      "data.id": "STRING (object ID, for campaign events)"
+    },
+    "note": "In production, Mailchimp sends form-encoded webhooks. This pipeline uses JSON for consistency. Authentication is via shared secret in URL query parameter (?secret=...)."
+  }
+}

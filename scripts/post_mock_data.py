@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "datagen"))
 from providers.shopify_provider import ShopifyProvider
 from providers.stripe_provider import StripeProvider
 from providers.hubspot_provider import HubSpotProvider
+from providers.mailchimp_provider import MailchimpProvider
 
 
 class MockDataPoster:
@@ -66,6 +67,7 @@ class MockDataPoster:
         self.shopify = ShopifyProvider(seed=seed)
         self.stripe = StripeProvider(seed=seed)
         self.hubspot = HubSpotProvider(seed=seed)
+        self.mailchimp = MailchimpProvider(seed=seed)
 
         # Shared customer pool for entity resolution testing
         self._shared_customers: List[Dict] = []
@@ -312,6 +314,85 @@ class MockDataPoster:
 
         return contacts
 
+    async def post_mailchimp_subscribers(
+        self,
+        client: httpx.AsyncClient,
+        count: int,
+        dry_run: bool = False,
+    ) -> List[Dict]:
+        """Generate and post Mailchimp subscribers."""
+        print(f"\n  Mailchimp Subscribers: {count}")
+        subscribers = []
+
+        for i in range(count):
+            subscriber = self.mailchimp.generate_subscriber(shared=self.get_shared_customer())
+            subscribers.append(subscriber)
+
+            if not dry_run:
+                success = await self.post_webhook(
+                    client,
+                    "/webhooks/mailchimp/webhook",
+                    subscriber,
+                )
+                if (i + 1) % 10 == 0:
+                    print(f"    Posted {i + 1}/{count}...")
+
+        return subscribers
+
+    async def post_mailchimp_campaigns(
+        self,
+        client: httpx.AsyncClient,
+        count: int,
+        dry_run: bool = False,
+    ) -> List[Dict]:
+        """Generate and post Mailchimp campaigns."""
+        print(f"\n  Mailchimp Campaigns: {count}")
+        campaigns = []
+
+        for i in range(count):
+            campaign = self.mailchimp.generate_campaign()
+            campaigns.append(campaign)
+
+            if not dry_run:
+                success = await self.post_webhook(
+                    client,
+                    "/webhooks/mailchimp/webhook",
+                    campaign,
+                )
+                if (i + 1) % 10 == 0:
+                    print(f"    Posted {i + 1}/{count}...")
+
+        return campaigns
+
+    async def post_mailchimp_events(
+        self,
+        client: httpx.AsyncClient,
+        count: int,
+        campaigns: List[Dict],
+        subscribers: List[Dict],
+        dry_run: bool = False,
+    ) -> List[Dict]:
+        """Generate and post Mailchimp events."""
+        print(f"\n  Mailchimp Events: {count}")
+        events = []
+
+        for i in range(count):
+            campaign = self.mailchimp.fake.random.choice(campaigns) if campaigns else None
+            subscriber = self.mailchimp.fake.random.choice(subscribers) if subscribers else None
+            event = self.mailchimp.generate_event(campaign=campaign, subscriber=subscriber)
+            events.append(event)
+
+            if not dry_run:
+                success = await self.post_webhook(
+                    client,
+                    "/webhooks/mailchimp/webhook",
+                    event,
+                )
+                if (i + 1) % 10 == 0:
+                    print(f"    Posted {i + 1}/{count}...")
+
+        return events
+
     async def run(
         self,
         source: str = "all",
@@ -320,18 +401,24 @@ class MockDataPoster:
         stripe_customers: int = 10,
         stripe_charges: int = 20,
         hubspot_contacts: int = 10,
+        mailchimp_subscribers: int = 10,
+        mailchimp_campaigns: int = 5,
+        mailchimp_events: int = 50,
         dry_run: bool = False,
     ) -> Dict[str, Any]:
         """
         Run the mock data posting.
 
         Args:
-            source: Source to post (shopify, stripe, hubspot, or all)
+            source: Source to post (shopify, stripe, hubspot, mailchimp, or all)
             shopify_customers: Number of Shopify customers
             shopify_orders: Number of Shopify orders
             stripe_customers: Number of Stripe customers
             stripe_charges: Number of Stripe charges
             hubspot_contacts: Number of HubSpot contacts
+            mailchimp_subscribers: Number of Mailchimp subscribers
+            mailchimp_campaigns: Number of Mailchimp campaigns
+            mailchimp_events: Number of Mailchimp events
             dry_run: If True, generate data but don't post
 
         Returns:
@@ -346,7 +433,7 @@ class MockDataPoster:
         print("=" * 60)
 
         # Generate shared customer pool for entity resolution
-        shared_count = max(shopify_customers, stripe_customers, hubspot_contacts) // 3
+        shared_count = max(shopify_customers, stripe_customers, hubspot_contacts, mailchimp_subscribers) // 3
         if shared_count > 0:
             print(f"\nGenerating shared customer pool ({shared_count} customers)...")
             self.generate_shared_customer_pool(shared_count)
@@ -390,6 +477,18 @@ class MockDataPoster:
                 print("\n[HUBSPOT]")
                 await self.post_hubspot_contacts(client, hubspot_contacts, dry_run)
 
+            if source in ("all", "mailchimp"):
+                print("\n[MAILCHIMP]")
+                mailchimp_subscriber_list = await self.post_mailchimp_subscribers(
+                    client, mailchimp_subscribers, dry_run
+                )
+                mailchimp_campaign_list = await self.post_mailchimp_campaigns(
+                    client, mailchimp_campaigns, dry_run
+                )
+                await self.post_mailchimp_events(
+                    client, mailchimp_events, mailchimp_campaign_list, mailchimp_subscriber_list, dry_run
+                )
+
         # Print summary
         print("\n" + "=" * 60)
         print("Summary")
@@ -413,7 +512,7 @@ class MockDataPoster:
 )
 @click.option(
     "--source",
-    type=click.Choice(["shopify", "stripe", "hubspot", "all"]),
+    type=click.Choice(["shopify", "stripe", "hubspot", "mailchimp", "all"]),
     default="all",
     help="Data source to post",
 )
@@ -448,6 +547,24 @@ class MockDataPoster:
     help="Number of HubSpot contacts",
 )
 @click.option(
+    "--mailchimp-subscribers",
+    default=10,
+    type=int,
+    help="Number of Mailchimp subscribers",
+)
+@click.option(
+    "--mailchimp-campaigns",
+    default=5,
+    type=int,
+    help="Number of Mailchimp campaigns",
+)
+@click.option(
+    "--mailchimp-events",
+    default=50,
+    type=int,
+    help="Number of Mailchimp events",
+)
+@click.option(
     "--seed",
     type=int,
     default=None,
@@ -466,6 +583,9 @@ def main(
     stripe_customers: int,
     stripe_charges: int,
     hubspot_contacts: int,
+    mailchimp_subscribers: int,
+    mailchimp_campaigns: int,
+    mailchimp_events: int,
     seed: Optional[int],
     dry_run: bool,
 ):
@@ -480,6 +600,9 @@ def main(
             stripe_customers=stripe_customers,
             stripe_charges=stripe_charges,
             hubspot_contacts=hubspot_contacts,
+            mailchimp_subscribers=mailchimp_subscribers,
+            mailchimp_campaigns=mailchimp_campaigns,
+            mailchimp_events=mailchimp_events,
             dry_run=dry_run,
         )
     )

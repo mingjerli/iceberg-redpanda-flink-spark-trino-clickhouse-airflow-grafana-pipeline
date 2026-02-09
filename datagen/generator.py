@@ -25,6 +25,7 @@ from tqdm import tqdm
 from providers.shopify_provider import ShopifyProvider
 from providers.stripe_provider import StripeProvider
 from providers.hubspot_provider import HubSpotProvider
+from providers.mailchimp_provider import MailchimpProvider
 
 
 class DataGenerator:
@@ -36,6 +37,7 @@ class DataGenerator:
         self.shopify = ShopifyProvider(seed=seed)
         self.stripe = StripeProvider(seed=seed)
         self.hubspot = HubSpotProvider(seed=seed)
+        self.mailchimp = MailchimpProvider(seed=seed)
 
         # Shared customer pool for cross-source entity resolution demo
         self._shared_customers: List[Dict] = []
@@ -206,6 +208,40 @@ class DataGenerator:
             "deals": deal_list,
         }
 
+    def generate_mailchimp_data(
+        self,
+        subscribers: int = 100,
+        campaigns: int = 20,
+        events: int = 500,
+    ) -> Dict[str, List[Dict]]:
+        """Generate complete Mailchimp dataset."""
+        # Generate subscribers, some from shared pool
+        subscriber_list = [
+            self.mailchimp.generate_subscriber(shared=self.get_shared_customer())
+            for _ in tqdm(range(subscribers), desc="Mailchimp Subscribers")
+        ]
+
+        # Generate campaigns with random list IDs
+        campaign_list = [
+            self.mailchimp.generate_campaign()
+            for _ in tqdm(range(campaigns), desc="Mailchimp Campaigns")
+        ]
+
+        # Generate events linked to campaigns and subscribers
+        event_list = [
+            self.mailchimp.generate_event(
+                campaign=random.choice(campaign_list) if campaign_list else None,
+                subscriber=random.choice(subscriber_list) if subscriber_list else None,
+            )
+            for _ in tqdm(range(events), desc="Mailchimp Events")
+        ]
+
+        return {
+            "subscribers": subscriber_list,
+            "campaigns": campaign_list,
+            "events": event_list,
+        }
+
     def generate_all(
         self,
         scale: float = 1.0,
@@ -246,10 +282,18 @@ class DataGenerator:
             deals=int(80 * scale),
         )
 
+        print("\n📬 Generating Mailchimp data...")
+        mailchimp_data = self.generate_mailchimp_data(
+            subscribers=int(100 * scale),
+            campaigns=int(20 * scale),
+            events=int(500 * scale),
+        )
+
         return {
             "shopify": shopify_data,
             "stripe": stripe_data,
             "hubspot": hubspot_data,
+            "mailchimp": mailchimp_data,
         }
 
     def save_to_files(
@@ -289,7 +333,7 @@ class DataGenerator:
 @click.command()
 @click.option(
     "--source",
-    type=click.Choice(["shopify", "stripe", "hubspot", "all"]),
+    type=click.Choice(["shopify", "stripe", "hubspot", "mailchimp", "all"]),
     default="all",
     help="Data source to generate",
 )
@@ -368,6 +412,12 @@ def main(
                 contacts=int(100 * scale),
                 companies=int(30 * scale),
                 deals=int(80 * scale),
+            )}
+        elif source == "mailchimp":
+            data = {"mailchimp": generator.generate_mailchimp_data(
+                subscribers=int(100 * scale),
+                campaigns=int(20 * scale),
+                events=int(500 * scale),
             )}
 
     print("\n💾 Saving generated data...")

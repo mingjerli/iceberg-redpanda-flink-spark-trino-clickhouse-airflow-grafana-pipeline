@@ -7,7 +7,7 @@
 
 CREATE TABLE IF NOT EXISTS semantic.entity_index (
     entity_id                   STRING          COMMENT 'Unified entity identifier (UUID)',
-    source                      STRING          COMMENT 'Source system: shopify, stripe, hubspot',
+    source                      STRING          COMMENT 'Source system: shopify, stripe, hubspot, mailchimp',
     source_id                   STRING          COMMENT 'Original ID in source system',
 
     -- Identity fields used for matching

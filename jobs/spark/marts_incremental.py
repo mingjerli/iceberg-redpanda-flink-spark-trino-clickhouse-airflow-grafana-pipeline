@@ -37,6 +37,7 @@ from pyspark.sql.functions import (
     current_timestamp,
     date_format,
     date_trunc,
+    datediff,
     dayofweek,
     first,
     greatest,
@@ -181,6 +182,20 @@ def build_customer_360(spark: SparkSession, mode: str = "incremental"):
             has_shopify BOOLEAN,
             has_hubspot BOOLEAN,
             has_stripe BOOLEAN,
+            has_mailchimp BOOLEAN,
+            mailchimp_subscriber_id STRING,
+            mailchimp_status STRING,
+            email_open_rate DECIMAL(5, 4),
+            email_click_rate DECIMAL(5, 4),
+            total_emails_received BIGINT,
+            total_emails_opened BIGINT,
+            total_emails_clicked BIGINT,
+            total_sms_received BIGINT,
+            total_sms_clicked BIGINT,
+            has_sms BOOLEAN,
+            last_email_open_date DATE,
+            last_email_click_date DATE,
+            days_since_last_email INT,
             is_active BOOLEAN,
             is_customer BOOLEAN,
             is_at_risk BOOLEAN,
@@ -386,6 +401,82 @@ def build_customer_360(spark: SparkSession, mode: str = "incremental"):
             .withColumn("refund_rate", lit(None).cast("decimal(5,4)")) \
             .withColumn("preferred_card_brand", lit(None).cast("string")) \
             .withColumn("has_stripe", lit(False))
+
+    # Add Mailchimp data if available.
+    # Joined via email (not entity_id) — customers without email won't match.
+    try:
+        mc_subscribers = spark.table("iceberg.staging.stg_mailchimp_subscribers")
+        mc_events = spark.table("iceberg.staging.stg_mailchimp_events")
+
+        # Get latest subscriber record per entity (cross-batch dedup)
+        mc_window = Window.partitionBy("subscriber_id").orderBy(col("_staged_at").desc())
+        mc_latest = mc_subscribers \
+            .withColumn("_rn", row_number().over(mc_window)) \
+            .where(col("_rn") == 1) \
+            .drop("_rn")
+
+        # Aggregate events per subscriber email
+        mc_event_agg = mc_events.groupBy("email_normalized").agg(
+            spark_sum(when(col("action") == "sent", 1).otherwise(0)).alias("total_emails_received"),
+            spark_sum(when(col("action") == "open", 1).otherwise(0)).alias("total_emails_opened"),
+            spark_sum(when(col("action") == "click", 1).otherwise(0)).alias("total_emails_clicked"),
+            spark_sum(when(col("action") == "sms_sent", 1).otherwise(0)).alias("total_sms_received"),
+            spark_sum(when(col("action") == "sms_click", 1).otherwise(0)).alias("total_sms_clicked"),
+            spark_max(when(col("action") == "open", col("event_date"))).alias("last_email_open_date"),
+            spark_max(when(col("action") == "click", col("event_date"))).alias("last_email_click_date")
+        )
+
+        # Join subscriber with event aggregates
+        mc_agg = mc_latest.join(
+            mc_event_agg,
+            mc_latest.email_normalized == mc_event_agg.email_normalized,
+            "left"
+        ).select(
+            mc_latest.email_normalized.alias("mc_email"),
+            mc_latest.subscriber_id.alias("mailchimp_subscriber_id"),
+            mc_latest.status.alias("mailchimp_status"),
+            mc_latest.avg_open_rate.alias("email_open_rate"),
+            mc_latest.avg_click_rate.alias("email_click_rate"),
+            coalesce(mc_event_agg.total_emails_received, lit(0)).cast("bigint").alias("total_emails_received"),
+            coalesce(mc_event_agg.total_emails_opened, lit(0)).cast("bigint").alias("total_emails_opened"),
+            coalesce(mc_event_agg.total_emails_clicked, lit(0)).cast("bigint").alias("total_emails_clicked"),
+            coalesce(mc_event_agg.total_sms_received, lit(0)).cast("bigint").alias("total_sms_received"),
+            coalesce(mc_event_agg.total_sms_clicked, lit(0)).cast("bigint").alias("total_sms_clicked"),
+            mc_latest.has_sms,
+            mc_event_agg.last_email_open_date,
+            mc_event_agg.last_email_click_date
+        )
+
+        # Join to mart_df via email
+        mart_df = mart_df.join(
+            mc_agg,
+            mart_df.email == mc_agg.mc_email,
+            "left"
+        ).drop("mc_email")
+
+        mart_df = mart_df \
+            .withColumn("has_mailchimp", col("mailchimp_subscriber_id").isNotNull()) \
+            .withColumn("days_since_last_email",
+                        when(col("last_email_open_date").isNotNull(),
+                             datediff(current_date(), col("last_email_open_date")))
+                        .otherwise(lit(None).cast("int")))
+    except Exception:
+        logger.warning("Could not read Mailchimp data")
+        mart_df = mart_df \
+            .withColumn("has_mailchimp", lit(False)) \
+            .withColumn("mailchimp_subscriber_id", lit(None).cast("string")) \
+            .withColumn("mailchimp_status", lit(None).cast("string")) \
+            .withColumn("email_open_rate", lit(None).cast("decimal(5,4)")) \
+            .withColumn("email_click_rate", lit(None).cast("decimal(5,4)")) \
+            .withColumn("total_emails_received", lit(0).cast("bigint")) \
+            .withColumn("total_emails_opened", lit(0).cast("bigint")) \
+            .withColumn("total_emails_clicked", lit(0).cast("bigint")) \
+            .withColumn("total_sms_received", lit(0).cast("bigint")) \
+            .withColumn("total_sms_clicked", lit(0).cast("bigint")) \
+            .withColumn("has_sms", lit(False)) \
+            .withColumn("last_email_open_date", lit(None).cast("date")) \
+            .withColumn("last_email_click_date", lit(None).cast("date")) \
+            .withColumn("days_since_last_email", lit(None).cast("int"))
 
     # Write to marts table
     mart_df.createOrReplaceTempView("new_customer_360")
@@ -739,11 +830,105 @@ def build_executive_summary(spark: SparkSession, mode: str = "incremental"):
     return len(periods)
 
 
+def build_campaign_dashboard(spark: SparkSession, mode: str = "incremental"):
+    """Build marts.campaign_dashboard denormalized campaign scorecard."""
+    logger.info(f"Processing campaign_dashboard in {mode} mode")
+
+    spark.sql("""
+        CREATE TABLE IF NOT EXISTS iceberg.marts.campaign_dashboard (
+            campaign_id STRING,
+            campaign_type STRING,
+            subject_line STRING,
+            send_time TIMESTAMP,
+            send_month STRING,
+            list_id STRING,
+            is_sms BOOLEAN,
+            is_automated BOOLEAN,
+            total_sent INT,
+            total_delivered INT,
+            total_opens BIGINT,
+            unique_opens INT,
+            total_clicks BIGINT,
+            unique_clicks INT,
+            total_bounces INT,
+            hard_bounces BIGINT,
+            soft_bounces BIGINT,
+            total_unsubscribes INT,
+            sms_sent BIGINT,
+            sms_clicks BIGINT,
+            delivery_rate DECIMAL(5, 4),
+            open_rate DECIMAL(5, 4),
+            click_rate DECIMAL(5, 4),
+            click_to_open_rate DECIMAL(5, 4),
+            bounce_rate DECIMAL(5, 4),
+            unsubscribe_rate DECIMAL(5, 4),
+            sms_click_rate DECIMAL(5, 4),
+            engagement_score DECIMAL(7, 2),
+            performance_tier STRING,
+            _computed_at TIMESTAMP
+        )
+        USING iceberg
+        PARTITIONED BY (send_month)
+    """)
+
+    watermark = None
+    if mode == "incremental":
+        watermark = get_watermark(spark, "campaign_dashboard")
+        if watermark:
+            logger.info(f"Incremental filter: _computed_at > {watermark}")
+
+    try:
+        metrics_df = spark.table("iceberg.analytics.campaign_metrics")
+    except Exception as e:
+        logger.error(f"Could not read campaign_metrics: {e}")
+        return 0
+
+    if watermark and mode == "incremental":
+        metrics_df = metrics_df.filter(col("_computed_at") > watermark)
+
+    record_count = metrics_df.count()
+    if record_count == 0:
+        logger.info("No new records to process")
+        return 0
+
+    logger.info(f"Processing {record_count} campaign records")
+
+    # Add send_month for partitioning
+    dashboard_df = metrics_df.withColumn(
+        "send_month",
+        date_format(col("send_time"), "yyyy-MM")
+    ).withColumn(
+        "_computed_at",
+        current_timestamp()
+    )
+
+    dashboard_df.createOrReplaceTempView("new_campaign_dashboard")
+
+    if mode == "full":
+        dashboard_df.write \
+            .format("iceberg") \
+            .mode("overwrite") \
+            .saveAsTable("iceberg.marts.campaign_dashboard")
+    else:
+        spark.sql("""
+            MERGE INTO iceberg.marts.campaign_dashboard AS target
+            USING new_campaign_dashboard AS source
+            ON target.campaign_id = source.campaign_id
+            WHEN MATCHED THEN UPDATE SET *
+            WHEN NOT MATCHED THEN INSERT *
+        """)
+
+    logger.info(f"Successfully built campaign_dashboard for {record_count} campaigns")
+    update_watermark(spark, "campaign_dashboard", record_count)
+    return record_count
+
+
 # Mapping of table names to build functions
 MARTS_FUNCTIONS = {
     "customer_360": build_customer_360,
     "sales_dashboard_daily": build_sales_dashboard_daily,
     "executive_summary": build_executive_summary,
+    "campaign_dashboard": build_campaign_dashboard,
 }
 
 

@@ -28,6 +28,9 @@
 #   STRIPE_CUSTOMERS    Number of Stripe customers (default: 30)
 #   STRIPE_CHARGES      Number of Stripe charges (default: 80)
 #   HUBSPOT_CONTACTS    Number of HubSpot contacts (default: 40)
+#   MAILCHIMP_SUBSCRIBERS Number of Mailchimp subscribers (default: 100)
+#   MAILCHIMP_CAMPAIGNS   Number of Mailchimp campaigns (default: 20)
+#   MAILCHIMP_EVENTS      Number of Mailchimp events (default: 500)
 # =============================================================================
 
 set -e
@@ -63,6 +66,9 @@ SHOPIFY_ORDERS=${SHOPIFY_ORDERS:-100}
 STRIPE_CUSTOMERS=${STRIPE_CUSTOMERS:-30}
 STRIPE_CHARGES=${STRIPE_CHARGES:-80}
 HUBSPOT_CONTACTS=${HUBSPOT_CONTACTS:-40}
+MAILCHIMP_SUBSCRIBERS=${MAILCHIMP_SUBSCRIBERS:-100}
+MAILCHIMP_CAMPAIGNS=${MAILCHIMP_CAMPAIGNS:-20}
+MAILCHIMP_EVENTS=${MAILCHIMP_EVENTS:-500}
 
 # Colors
 RED='\033[0;31m'
@@ -103,6 +109,9 @@ for arg in "$@"; do
             echo "  STRIPE_CUSTOMERS    Number of Stripe customers (default: 30)"
             echo "  STRIPE_CHARGES      Number of Stripe charges (default: 80)"
             echo "  HUBSPOT_CONTACTS    Number of HubSpot contacts (default: 40)"
+            echo "  MAILCHIMP_SUBSCRIBERS Number of Mailchimp subscribers (default: 100)"
+            echo "  MAILCHIMP_CAMPAIGNS   Number of Mailchimp campaigns (default: 20)"
+            echo "  MAILCHIMP_EVENTS      Number of Mailchimp events (default: 500)"
             exit 0
             ;;
     esac
@@ -382,6 +391,7 @@ generate_mock_data() {
     log_info "Shopify: $SHOPIFY_CUSTOMERS customers, $SHOPIFY_ORDERS orders"
     log_info "Stripe:  $STRIPE_CUSTOMERS customers, $STRIPE_CHARGES charges"
     log_info "HubSpot: $HUBSPOT_CONTACTS contacts"
+    log_info "Mailchimp: $MAILCHIMP_SUBSCRIBERS subscribers, $MAILCHIMP_CAMPAIGNS campaigns, $MAILCHIMP_EVENTS events"
     echo ""
 
     "$PYTHON_CMD" scripts/post_mock_data.py \
@@ -391,6 +401,9 @@ generate_mock_data() {
         --stripe-customers "$STRIPE_CUSTOMERS" \
         --stripe-charges "$STRIPE_CHARGES" \
         --hubspot-contacts "$HUBSPOT_CONTACTS" \
+        --mailchimp-subscribers "$MAILCHIMP_SUBSCRIBERS" \
+        --mailchimp-campaigns "$MAILCHIMP_CAMPAIGNS" \
+        --mailchimp-events "$MAILCHIMP_EVENTS" \
         --seed 42 2>&1 | grep -E "Posted|Total|Summary" || true
 
     log_success "Mock data generated"
@@ -408,7 +421,7 @@ submit_flink_jobs() {
     log_info "These jobs read from Kafka and write to Iceberg raw tables"
     echo ""
 
-    for job in shopify_orders shopify_customers stripe_charges stripe_customers hubspot_contacts; do
+    for job in shopify_orders shopify_customers stripe_charges stripe_customers hubspot_contacts mailchimp_campaigns mailchimp_events mailchimp_subscribers; do
         log_info "Submitting: ${job}_full.sql"
         docker exec iceberg-flink-jobmanager /opt/flink/bin/sql-client.sh embedded \
             -f "/opt/flink/jobs/${job}_full.sql" 2>&1 | tail -3 &
@@ -424,7 +437,7 @@ submit_flink_jobs() {
     if [ "$VALIDATE_MODE" = true ]; then
         echo ""
         log_step "Validating raw tables..."
-        for table in shopify_orders shopify_customers stripe_charges stripe_customers hubspot_contacts; do
+        for table in shopify_orders shopify_customers stripe_charges stripe_customers hubspot_contacts mailchimp_campaigns mailchimp_events mailchimp_subscribers; do
             if check_table_exists "raw" "$table"; then
                 log_success "Raw table exists: raw.$table"
             else
@@ -433,7 +446,7 @@ submit_flink_jobs() {
         done
 
         # Check Redpanda messages
-        for topic in shopify.orders shopify.customers stripe.charges stripe.customers hubspot.contacts; do
+        for topic in shopify.orders shopify.customers stripe.charges stripe.customers hubspot.contacts mailchimp.campaigns mailchimp.events mailchimp.subscribers; do
             local msg_count=$(docker exec iceberg-redpanda rpk topic consume "$topic" --num 1 --format json 2>/dev/null | wc -l)
             if [ "$msg_count" -gt 0 ]; then
                 log_success "Messages in Redpanda topic: $topic"
@@ -502,7 +515,7 @@ run_batch_pipeline() {
 
     echo ""
     log_step "Running staging batch jobs..."
-    for table in shopify_orders shopify_customers stripe_charges stripe_customers hubspot_contacts; do
+    for table in shopify_orders shopify_customers stripe_charges stripe_customers hubspot_contacts mailchimp_campaigns mailchimp_events mailchimp_subscribers; do
         log_info "Processing: $table"
         $SPARK_SUBMIT /opt/spark/jobs/staging_batch.py --table $table --mode full 2>&1 | tail -3 || {
             log_warning "Failed to process $table"
@@ -511,7 +524,7 @@ run_batch_pipeline() {
     log_success "Staging complete"
 
     if [ "$VALIDATE_MODE" = true ]; then
-        for table in stg_shopify_orders stg_shopify_customers stg_stripe_charges stg_stripe_customers stg_hubspot_contacts; do
+        for table in stg_shopify_orders stg_shopify_customers stg_stripe_charges stg_stripe_customers stg_hubspot_contacts stg_mailchimp_campaigns stg_mailchimp_events stg_mailchimp_subscribers; do
             if check_table_exists "staging" "$table"; then
                 log_success "Staging table exists: staging.$table"
             else
@@ -552,7 +565,7 @@ run_batch_pipeline() {
     log_success "Analytics complete"
 
     if [ "$VALIDATE_MODE" = true ]; then
-        for table in customer_metrics order_summary payment_metrics; do
+        for table in customer_metrics order_summary payment_metrics campaign_metrics; do
             if check_table_exists "analytics" "$table"; then
                 log_success "Analytics table exists: analytics.$table"
             else
@@ -569,7 +582,7 @@ run_batch_pipeline() {
     log_success "Marts complete"
 
     if [ "$VALIDATE_MODE" = true ]; then
-        for table in customer_360 sales_dashboard_daily; do
+        for table in customer_360 sales_dashboard_daily campaign_dashboard; do
             if check_table_exists "marts" "$table"; then
                 log_success "Marts table exists: marts.$table"
             else
@@ -624,11 +637,17 @@ validate_tables() {
         "raw.stripe_charges"
         "raw.stripe_customers"
         "raw.hubspot_contacts"
+        "raw.mailchimp_campaigns"
+        "raw.mailchimp_events"
+        "raw.mailchimp_subscribers"
         "staging.stg_shopify_orders"
         "staging.stg_shopify_customers"
         "staging.stg_stripe_charges"
         "staging.stg_stripe_customers"
         "staging.stg_hubspot_contacts"
+        "staging.stg_mailchimp_campaigns"
+        "staging.stg_mailchimp_events"
+        "staging.stg_mailchimp_subscribers"
         "semantic.entity_index"
         "semantic.blocking_index"
         "core.customers"
@@ -636,9 +655,11 @@ validate_tables() {
         "analytics.customer_metrics"
         "analytics.order_summary"
         "analytics.payment_metrics"
+        "analytics.campaign_metrics"
         "marts.customer_360"
         "marts.sales_dashboard_daily"
         "marts.executive_summary"
+        "marts.campaign_dashboard"
     )
 
     local all_passed=true
