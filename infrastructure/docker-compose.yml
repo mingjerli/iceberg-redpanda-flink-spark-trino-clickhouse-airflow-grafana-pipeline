@@ -334,6 +334,7 @@ services:
     volumes:
       - ../jobs/spark:/opt/spark/jobs:ro
       - ../sql:/opt/spark/sql:ro
+      - ../datagen/output:/opt/spark/data:ro
     depends_on:
       minio-init:
         condition: service_completed_successfully
@@ -364,6 +365,7 @@ services:
     volumes:
       - ../jobs/spark:/opt/spark/jobs:ro
       - ../sql:/opt/spark/sql:ro
+      - ../datagen/output:/opt/spark/data:ro
     depends_on:
       spark-master:
         condition: service_healthy
