@@ -1,0 +1,23 @@
+Codemap Diff Report
+Generated: 2026-02-08
+
+Status: INITIAL GENERATION (no previous codemaps to compare)
+
+Files Created:
+  docs/codemaps/architecture.md  - Overall system architecture, service topology, data flow, orchestration
+  docs/codemaps/backend.md       - Ingestion API, batch jobs, streaming jobs, data generation, scripts
+  docs/codemaps/data.md          - All 27 Iceberg tables, 8 Redpanda topics, 24 ClickHouse views
+
+Skipped:
+  docs/codemaps/frontend.md      - N/A (no frontend; visualization is via Grafana dashboards)
+
+Diff: N/A (first generation, 0% change from previous)
+
+Summary:
+  - 4 data sources: Shopify, Stripe, HubSpot, Mailchimp
+  - 21 Docker containers (18 services + 3 init)
+  - 27 Iceberg tables across 6 layers (raw/staging/semantic/core/analytics/marts)
+  - 8 Flink streaming jobs, 6 Spark batch jobs, 3 maintenance jobs
+  - 6 Grafana dashboards, 24 ClickHouse views
+  - 8 Redpanda topics
+  - Airflow DAG with 4-hour schedule
