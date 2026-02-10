@@ -196,6 +196,12 @@ def build_customer_360(spark: SparkSession, mode: str = "incremental"):
             last_email_open_date DATE,
             last_email_click_date DATE,
             days_since_last_email INT,
+            has_ga4 BOOLEAN,
+            ga4_total_sessions BIGINT,
+            ga4_total_page_views BIGINT,
+            ga4_last_session_date DATE,
+            ga4_engagement_rate DECIMAL(5, 4),
+            ga4_bounce_rate DECIMAL(5, 4),
             is_active BOOLEAN,
             is_customer BOOLEAN,
             is_at_risk BOOLEAN,
@@ -477,6 +483,52 @@ def build_customer_360(spark: SparkSession, mode: str = "incremental"):
             .withColumn("last_email_open_date", lit(None).cast("date")) \
             .withColumn("last_email_click_date", lit(None).cast("date")) \
             .withColumn("days_since_last_email", lit(None).cast("int"))
+
+    # Join GA4 session data (web analytics)
+    try:
+        ga4_sessions = spark.table("iceberg.staging.stg_ga4_sessions").filter(
+            col("user_id").isNotNull() & (col("user_id") != "")
+        )
+
+        # Aggregate GA4 metrics by user_id (email)
+        ga4_agg = ga4_sessions.groupBy(col("user_id").alias("ga4_email")).agg(
+            count("session_id").alias("ga4_total_sessions"),
+            spark_sum("page_view_count").alias("ga4_total_page_views"),
+            spark_max("session_start").cast("date").alias("ga4_last_session_date"),
+            avg(when(col("is_engaged_session"), 1.0).otherwise(0.0)).cast(DecimalType(5, 4)).alias("ga4_engagement_rate"),
+            avg(when(col("is_bounce"), 1.0).otherwise(0.0)).cast(DecimalType(5, 4)).alias("ga4_bounce_rate")
+        )
+
+        # Join to mart_df via email
+        mart_df = mart_df.join(
+            ga4_agg,
+            mart_df.email == ga4_agg.ga4_email,
+            "left"
+        ).drop("ga4_email")
+
+        mart_df = mart_df.withColumn("has_ga4", col("ga4_total_sessions").isNotNull())
+
+    except Exception:
+        logger.warning("Could not read GA4 data")
+        mart_df = mart_df \
+            .withColumn("has_ga4", lit(False)) \
+            .withColumn("ga4_total_sessions", lit(0).cast("bigint")) \
+            .withColumn("ga4_total_page_views", lit(0).cast("bigint")) \
+            .withColumn("ga4_last_session_date", lit(None).cast("date")) \
+            .withColumn("ga4_engagement_rate", lit(None).cast("decimal(5,4)")) \
+            .withColumn("ga4_bounce_rate", lit(None).cast("decimal(5,4)"))
+
+    # Recalculate source_count including GA4
+    mart_df = mart_df.withColumn(
+        "source_count",
+        (
+            when(col("has_shopify"), 1).otherwise(0) +
+            when(col("has_hubspot"), 1).otherwise(0) +
+            when(col("has_stripe"), 1).otherwise(0) +
+            when(col("has_mailchimp"), 1).otherwise(0) +
+            when(col("has_ga4"), 1).otherwise(0)
+        )
+    )
 
     # Write to marts table
     mart_df.createOrReplaceTempView("new_customer_360")
@@ -923,12 +975,157 @@ def build_campaign_dashboard(spark: SparkSession, mode: str = "incremental"):
     return record_count
 
 
+def build_ga4_engagement_dashboard(spark: SparkSession, mode: str = "incremental"):
+    """
+    Build marts.ga4_engagement_dashboard for web analytics reporting.
+
+    Aggregates GA4 engagement metrics with rolling averages and device/channel breakdown.
+    """
+    logger.info(f"Processing ga4_engagement_dashboard in {mode} mode")
+
+    # Create marts table
+    spark.sql("""
+        CREATE TABLE IF NOT EXISTS iceberg.marts.ga4_engagement_dashboard (
+            metric_date DATE,
+            total_sessions BIGINT,
+            total_users BIGINT,
+            total_page_views BIGINT,
+            engaged_sessions BIGINT,
+            bounced_sessions BIGINT,
+            total_conversions BIGINT,
+            total_conversion_value DECIMAL(18, 2),
+            engagement_rate DECIMAL(5, 4),
+            bounce_rate DECIMAL(5, 4),
+            conversion_rate DECIMAL(5, 4),
+            avg_session_duration_sec DECIMAL(10, 2),
+            sessions_7day_ma DECIMAL(18, 2),
+            engagement_rate_7day_ma DECIMAL(5, 4),
+            top_traffic_source STRING,
+            top_device_category STRING,
+            desktop_sessions BIGINT,
+            mobile_sessions BIGINT,
+            tablet_sessions BIGINT,
+            organic_sessions BIGINT,
+            paid_sessions BIGINT,
+            direct_sessions BIGINT,
+            social_sessions BIGINT,
+            top_country STRING,
+            _computed_at TIMESTAMP,
+            _version INT
+        )
+        USING iceberg
+        PARTITIONED BY (months(metric_date))
+    """)
+
+    # Read engagement metrics
+    try:
+        engagement_df = spark.table("iceberg.analytics.ga4_engagement_metrics")
+    except Exception as e:
+        logger.error(f"Could not read ga4_engagement_metrics: {e}")
+        return 0
+
+    # Read sessions for device/channel breakdown
+    try:
+        sessions_df = spark.table("iceberg.staging.stg_ga4_sessions")
+    except Exception as e:
+        logger.error(f"Could not read stg_ga4_sessions: {e}")
+        return 0
+
+    # Compute device breakdown by date
+    device_breakdown = sessions_df.groupBy(col("session_date").alias("metric_date")).agg(
+        spark_sum(when(col("device_category") == "desktop", 1).otherwise(0)).alias("desktop_sessions"),
+        spark_sum(when(col("device_category") == "mobile", 1).otherwise(0)).alias("mobile_sessions"),
+        spark_sum(when(col("device_category") == "tablet", 1).otherwise(0)).alias("tablet_sessions")
+    )
+
+    # Compute channel breakdown by date
+    channel_breakdown = sessions_df.groupBy(col("session_date").alias("metric_date")).agg(
+        spark_sum(when(col("channel_group") == "organic_search", 1).otherwise(0)).alias("organic_sessions"),
+        spark_sum(when(col("channel_group") == "paid_search", 1).otherwise(0)).alias("paid_sessions"),
+        spark_sum(when(col("channel_group") == "direct", 1).otherwise(0)).alias("direct_sessions"),
+        spark_sum(when(col("channel_group") == "social", 1).otherwise(0)).alias("social_sessions")
+    )
+
+    # Get top traffic source and device per day
+    from pyspark.sql import Window as W
+    traffic_win = W.partitionBy("session_date", "traffic_source").orderBy(col("session_count").desc())
+    device_win = W.partitionBy("session_date", "device_category").orderBy(col("session_count").desc())
+
+    top_traffic = sessions_df.groupBy("session_date", "traffic_source").agg(
+        count("*").alias("session_count")
+    ).withColumn("rn", row_number().over(traffic_win)).filter(col("rn") == 1).select(
+        col("session_date").alias("metric_date"),
+        col("traffic_source").alias("top_traffic_source")
+    )
+
+    top_device = sessions_df.groupBy("session_date", "device_category").agg(
+        count("*").alias("session_count")
+    ).withColumn("rn", row_number().over(device_win)).filter(col("rn") == 1).select(
+        col("session_date").alias("metric_date"),
+        col("device_category").alias("top_device_category")
+    )
+
+    # Get top country per day
+    country_win = W.partitionBy("session_date", "geo_country").orderBy(col("session_count").desc())
+    top_country = sessions_df.groupBy("session_date", "geo_country").agg(
+        count("*").alias("session_count")
+    ).withColumn("rn", row_number().over(country_win)).filter(col("rn") == 1).select(
+        col("session_date").alias("metric_date"),
+        col("geo_country").alias("top_country")
+    )
+
+    # Compute 7-day moving averages
+    from pyspark.sql import Window as W2
+    date_win = W2.orderBy("metric_date").rowsBetween(-6, 0)
+
+    dashboard = engagement_df \
+        .join(device_breakdown, on="metric_date", how="left") \
+        .join(channel_breakdown, on="metric_date", how="left") \
+        .join(top_traffic, on="metric_date", how="left") \
+        .join(top_device, on="metric_date", how="left") \
+        .join(top_country, on="metric_date", how="left") \
+        .withColumn("sessions_7day_ma", avg("total_sessions").over(date_win).cast(DecimalType(18, 2))) \
+        .withColumn("engagement_rate_7day_ma", avg("engagement_rate").over(date_win).cast(DecimalType(5, 4))) \
+        .withColumn("_computed_at", current_timestamp()) \
+        .withColumn("_version", lit(1)) \
+        .select(
+            "metric_date", "total_sessions", "total_users", "total_page_views",
+            "engaged_sessions", "bounced_sessions", "total_conversions", "total_conversion_value",
+            "engagement_rate", "bounce_rate", "conversion_rate", "avg_session_duration_sec",
+            "sessions_7day_ma", "engagement_rate_7day_ma",
+            "top_traffic_source", "top_device_category",
+            "desktop_sessions", "mobile_sessions", "tablet_sessions",
+            "organic_sessions", "paid_sessions", "direct_sessions", "social_sessions",
+            "top_country", "_computed_at", "_version"
+        )
+
+    dashboard.createOrReplaceTempView("new_ga4_engagement_dashboard")
+
+    # Write
+    if mode == "full":
+        dashboard.write.format("iceberg").mode("overwrite").saveAsTable("iceberg.marts.ga4_engagement_dashboard")
+    else:
+        spark.sql("""
+            MERGE INTO iceberg.marts.ga4_engagement_dashboard AS target
+            USING new_ga4_engagement_dashboard AS source
+            ON target.metric_date = source.metric_date
+            WHEN MATCHED THEN UPDATE SET *
+            WHEN NOT MATCHED THEN INSERT *
+        """)
+
+    record_count = dashboard.count()
+    logger.info(f"Successfully built ga4_engagement_dashboard for {record_count} days")
+    update_watermark(spark, "ga4_engagement_dashboard", record_count)
+    return record_count
+
+
 # Mapping of table names to build functions
 MARTS_FUNCTIONS = {
     "customer_360": build_customer_360,
     "sales_dashboard_daily": build_sales_dashboard_daily,
     "executive_summary": build_executive_summary,
     "campaign_dashboard": build_campaign_dashboard,
+    "ga4_engagement_dashboard": build_ga4_engagement_dashboard,
 }
 
 

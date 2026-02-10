@@ -42,6 +42,7 @@ UNION ALL SELECT 'raw.hubspot_contacts', COUNT(*) FROM iceberg.raw.hubspot_conta
 UNION ALL SELECT 'raw.mailchimp_campaigns', COUNT(*) FROM iceberg.raw.mailchimp_campaigns
 UNION ALL SELECT 'raw.mailchimp_events', COUNT(*) FROM iceberg.raw.mailchimp_events
 UNION ALL SELECT 'raw.mailchimp_subscribers', COUNT(*) FROM iceberg.raw.mailchimp_subscribers
+UNION ALL SELECT 'raw.ga4_events', COUNT(*) FROM iceberg.raw.ga4_events
 UNION ALL SELECT 'staging.stg_shopify_orders', COUNT(*) FROM iceberg.staging.stg_shopify_orders
 UNION ALL SELECT 'staging.stg_shopify_customers', COUNT(*) FROM iceberg.staging.stg_shopify_customers
 UNION ALL SELECT 'staging.stg_stripe_charges', COUNT(*) FROM iceberg.staging.stg_stripe_charges
@@ -50,6 +51,8 @@ UNION ALL SELECT 'staging.stg_hubspot_contacts', COUNT(*) FROM iceberg.staging.s
 UNION ALL SELECT 'staging.stg_mailchimp_campaigns', COUNT(*) FROM iceberg.staging.stg_mailchimp_campaigns
 UNION ALL SELECT 'staging.stg_mailchimp_events', COUNT(*) FROM iceberg.staging.stg_mailchimp_events
 UNION ALL SELECT 'staging.stg_mailchimp_subscribers', COUNT(*) FROM iceberg.staging.stg_mailchimp_subscribers
+UNION ALL SELECT 'staging.stg_ga4_events', COUNT(*) FROM iceberg.staging.stg_ga4_events
+UNION ALL SELECT 'staging.stg_ga4_sessions', COUNT(*) FROM iceberg.staging.stg_ga4_sessions
 UNION ALL SELECT 'semantic.entity_index', COUNT(*) FROM iceberg.semantic.entity_index
 UNION ALL SELECT 'semantic.blocking_index', COUNT(*) FROM iceberg.semantic.blocking_index
 UNION ALL SELECT 'core.customers', COUNT(*) FROM iceberg.core.customers
@@ -58,8 +61,13 @@ UNION ALL SELECT 'analytics.customer_metrics', COUNT(*) FROM iceberg.analytics.c
 UNION ALL SELECT 'analytics.order_summary', COUNT(*) FROM iceberg.analytics.order_summary
 UNION ALL SELECT 'analytics.payment_metrics', COUNT(*) FROM iceberg.analytics.payment_metrics
 UNION ALL SELECT 'analytics.campaign_metrics', COUNT(*) FROM iceberg.analytics.campaign_metrics
+UNION ALL SELECT 'analytics.ga4_engagement_metrics', COUNT(*) FROM iceberg.analytics.ga4_engagement_metrics
+UNION ALL SELECT 'analytics.ga4_engagement_by_channel', COUNT(*) FROM iceberg.analytics.ga4_engagement_by_channel
+UNION ALL SELECT 'analytics.ga4_page_performance', COUNT(*) FROM iceberg.analytics.ga4_page_performance
+UNION ALL SELECT 'analytics.ga4_funnel_analysis', COUNT(*) FROM iceberg.analytics.ga4_funnel_analysis
 UNION ALL SELECT 'marts.customer_360', COUNT(*) FROM iceberg.marts.customer_360
 UNION ALL SELECT 'marts.campaign_dashboard', COUNT(*) FROM iceberg.marts.campaign_dashboard
+UNION ALL SELECT 'marts.ga4_engagement_dashboard', COUNT(*) FROM iceberg.marts.ga4_engagement_dashboard
 ORDER BY table_name
 "
 

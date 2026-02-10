@@ -63,6 +63,11 @@ SELECT *
 FROM iceberg('http://minio:9000/warehouse/raw/mailchimp_subscribers/',
              '__MINIO_USER__', '__MINIO_PASSWORD__');
 
+CREATE OR REPLACE VIEW iceberg.raw_ga4_events AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/raw/ga4_events/',
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
+
 -- =============================================================================
 -- Staging Layer Views
 -- =============================================================================
@@ -107,6 +112,16 @@ SELECT *
 FROM iceberg('http://minio:9000/warehouse/staging/stg_mailchimp_subscribers/',
              '__MINIO_USER__', '__MINIO_PASSWORD__');
 
+CREATE OR REPLACE VIEW iceberg.stg_ga4_events AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/staging/stg_ga4_events/',
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
+
+CREATE OR REPLACE VIEW iceberg.stg_ga4_sessions AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/staging/stg_ga4_sessions/',
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
+
 -- =============================================================================
 -- Semantic Layer Views
 -- =============================================================================
@@ -140,6 +155,26 @@ SELECT *
 FROM iceberg('http://minio:9000/warehouse/analytics/campaign_metrics/',
              '__MINIO_USER__', '__MINIO_PASSWORD__');
 
+CREATE OR REPLACE VIEW iceberg.ga4_engagement_metrics AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/analytics/ga4_engagement_metrics/',
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
+
+CREATE OR REPLACE VIEW iceberg.ga4_engagement_by_channel AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/analytics/ga4_engagement_by_channel/',
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
+
+CREATE OR REPLACE VIEW iceberg.ga4_page_performance AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/analytics/ga4_page_performance/',
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
+
+CREATE OR REPLACE VIEW iceberg.ga4_funnel_analysis AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/analytics/ga4_funnel_analysis/',
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
+
 -- =============================================================================
 -- Marts Layer Views
 -- =============================================================================
@@ -157,6 +192,11 @@ FROM iceberg('http://minio:9000/warehouse/marts/sales_dashboard_daily/',
 CREATE OR REPLACE VIEW iceberg.campaign_dashboard AS
 SELECT *
 FROM iceberg('http://minio:9000/warehouse/marts/campaign_dashboard/',
+             '__MINIO_USER__', '__MINIO_PASSWORD__');
+
+CREATE OR REPLACE VIEW iceberg.ga4_engagement_dashboard AS
+SELECT *
+FROM iceberg('http://minio:9000/warehouse/marts/ga4_engagement_dashboard/',
              '__MINIO_USER__', '__MINIO_PASSWORD__');
 
 -- =============================================================================

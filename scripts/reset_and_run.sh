@@ -31,6 +31,8 @@
 #   MAILCHIMP_SUBSCRIBERS Number of Mailchimp subscribers (default: 100)
 #   MAILCHIMP_CAMPAIGNS   Number of Mailchimp campaigns (default: 20)
 #   MAILCHIMP_EVENTS      Number of Mailchimp events (default: 500)
+#   GA4_EXPORT_FILES      Number of GA4 export files (default: 3)
+#   GA4_SESSIONS_PER_FILE Number of GA4 sessions per file (default: 20)
 # =============================================================================
 
 set -e
@@ -69,6 +71,8 @@ HUBSPOT_CONTACTS=${HUBSPOT_CONTACTS:-40}
 MAILCHIMP_SUBSCRIBERS=${MAILCHIMP_SUBSCRIBERS:-100}
 MAILCHIMP_CAMPAIGNS=${MAILCHIMP_CAMPAIGNS:-20}
 MAILCHIMP_EVENTS=${MAILCHIMP_EVENTS:-500}
+GA4_EXPORT_FILES=${GA4_EXPORT_FILES:-3}
+GA4_SESSIONS_PER_FILE=${GA4_SESSIONS_PER_FILE:-20}
 
 # Colors
 RED='\033[0;31m'
@@ -112,6 +116,8 @@ for arg in "$@"; do
             echo "  MAILCHIMP_SUBSCRIBERS Number of Mailchimp subscribers (default: 100)"
             echo "  MAILCHIMP_CAMPAIGNS   Number of Mailchimp campaigns (default: 20)"
             echo "  MAILCHIMP_EVENTS      Number of Mailchimp events (default: 500)"
+            echo "  GA4_EXPORT_FILES      Number of GA4 export files (default: 3)"
+            echo "  GA4_SESSIONS_PER_FILE Number of GA4 sessions per file (default: 20)"
             exit 0
             ;;
     esac
@@ -392,6 +398,7 @@ generate_mock_data() {
     log_info "Stripe:  $STRIPE_CUSTOMERS customers, $STRIPE_CHARGES charges"
     log_info "HubSpot: $HUBSPOT_CONTACTS contacts"
     log_info "Mailchimp: $MAILCHIMP_SUBSCRIBERS subscribers, $MAILCHIMP_CAMPAIGNS campaigns, $MAILCHIMP_EVENTS events"
+    log_info "GA4: $GA4_EXPORT_FILES export files, $GA4_SESSIONS_PER_FILE sessions/file (Parquet batch)"
     echo ""
 
     "$PYTHON_CMD" scripts/post_mock_data.py \
@@ -514,8 +521,16 @@ run_batch_pipeline() {
     log_success "Metadata tables ready"
 
     echo ""
+    log_step "Running GA4 batch ingest..."
+    log_info "Ingesting GA4 Parquet exports to raw layer"
+    $SPARK_SUBMIT /opt/spark/jobs/ga4_batch_ingest.py --mode full 2>&1 | tail -3 || {
+        log_warning "GA4 batch ingest had issues"
+    }
+    log_success "GA4 batch ingest complete"
+
+    echo ""
     log_step "Running staging batch jobs..."
-    for table in shopify_orders shopify_customers stripe_charges stripe_customers hubspot_contacts mailchimp_campaigns mailchimp_events mailchimp_subscribers; do
+    for table in shopify_orders shopify_customers stripe_charges stripe_customers hubspot_contacts mailchimp_campaigns mailchimp_events mailchimp_subscribers stg_ga4_events stg_ga4_sessions; do
         log_info "Processing: $table"
         $SPARK_SUBMIT /opt/spark/jobs/staging_batch.py --table $table --mode full 2>&1 | tail -3 || {
             log_warning "Failed to process $table"
@@ -524,7 +539,7 @@ run_batch_pipeline() {
     log_success "Staging complete"
 
     if [ "$VALIDATE_MODE" = true ]; then
-        for table in stg_shopify_orders stg_shopify_customers stg_stripe_charges stg_stripe_customers stg_hubspot_contacts stg_mailchimp_campaigns stg_mailchimp_events stg_mailchimp_subscribers; do
+        for table in stg_shopify_orders stg_shopify_customers stg_stripe_charges stg_stripe_customers stg_hubspot_contacts stg_mailchimp_campaigns stg_mailchimp_events stg_mailchimp_subscribers stg_ga4_events stg_ga4_sessions; do
             if check_table_exists "staging" "$table"; then
                 log_success "Staging table exists: staging.$table"
             else
@@ -565,7 +580,7 @@ run_batch_pipeline() {
     log_success "Analytics complete"
 
     if [ "$VALIDATE_MODE" = true ]; then
-        for table in customer_metrics order_summary payment_metrics campaign_metrics; do
+        for table in customer_metrics order_summary payment_metrics campaign_metrics ga4_engagement_metrics ga4_engagement_by_channel ga4_page_performance ga4_funnel_analysis; do
             if check_table_exists "analytics" "$table"; then
                 log_success "Analytics table exists: analytics.$table"
             else
@@ -582,7 +597,7 @@ run_batch_pipeline() {
     log_success "Marts complete"
 
     if [ "$VALIDATE_MODE" = true ]; then
-        for table in customer_360 sales_dashboard_daily campaign_dashboard; do
+        for table in customer_360 sales_dashboard_daily campaign_dashboard ga4_engagement_dashboard; do
             if check_table_exists "marts" "$table"; then
                 log_success "Marts table exists: marts.$table"
             else
@@ -640,6 +655,7 @@ validate_tables() {
         "raw.mailchimp_campaigns"
         "raw.mailchimp_events"
         "raw.mailchimp_subscribers"
+        "raw.ga4_events"
         "staging.stg_shopify_orders"
         "staging.stg_shopify_customers"
         "staging.stg_stripe_charges"
@@ -648,6 +664,8 @@ validate_tables() {
         "staging.stg_mailchimp_campaigns"
         "staging.stg_mailchimp_events"
         "staging.stg_mailchimp_subscribers"
+        "staging.stg_ga4_events"
+        "staging.stg_ga4_sessions"
         "semantic.entity_index"
         "semantic.blocking_index"
         "core.customers"
@@ -656,10 +674,15 @@ validate_tables() {
         "analytics.order_summary"
         "analytics.payment_metrics"
         "analytics.campaign_metrics"
+        "analytics.ga4_engagement_metrics"
+        "analytics.ga4_engagement_by_channel"
+        "analytics.ga4_page_performance"
+        "analytics.ga4_funnel_analysis"
         "marts.customer_360"
         "marts.sales_dashboard_daily"
         "marts.executive_summary"
         "marts.campaign_dashboard"
+        "marts.ga4_engagement_dashboard"
     )
 
     local all_passed=true

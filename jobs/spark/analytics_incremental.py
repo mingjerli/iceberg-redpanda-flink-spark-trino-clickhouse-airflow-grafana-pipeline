@@ -851,12 +851,355 @@ def compute_campaign_metrics(spark: SparkSession, mode: str = "incremental"):
     return record_count
 
 
+def compute_ga4_engagement_metrics(spark: SparkSession, mode: str = "incremental"):
+    """
+    Compute analytics.ga4_engagement_metrics from staging.stg_ga4_sessions.
+
+    Daily aggregation of engagement metrics for web analytics dashboard.
+    """
+    logger.info(f"Processing ga4_engagement_metrics in {mode} mode")
+
+    # Create analytics table
+    spark.sql("""
+        CREATE TABLE IF NOT EXISTS iceberg.analytics.ga4_engagement_metrics (
+            metric_date DATE,
+            total_sessions BIGINT,
+            total_users BIGINT,
+            total_page_views BIGINT,
+            engaged_sessions BIGINT,
+            bounced_sessions BIGINT,
+            avg_session_duration_sec DECIMAL(10, 2),
+            avg_engagement_time_ms BIGINT,
+            total_conversions BIGINT,
+            total_conversion_value DECIMAL(18, 2),
+            engagement_rate DECIMAL(5, 4),
+            bounce_rate DECIMAL(5, 4),
+            conversion_rate DECIMAL(5, 4),
+            avg_events_per_session DECIMAL(10, 2),
+            _computed_at TIMESTAMP,
+            _version INT
+        )
+        USING iceberg
+        PARTITIONED BY (months(metric_date))
+    """)
+
+    # Read sessions
+    sessions_df = spark.table("iceberg.staging.stg_ga4_sessions")
+
+    # Compute daily metrics
+    metrics = sessions_df.groupBy(col("session_date").alias("metric_date")).agg(
+        count("*").alias("total_sessions"),
+        countDistinct("client_id").alias("total_users"),
+        spark_sum("page_view_count").alias("total_page_views"),
+        spark_sum(when(col("is_engaged_session"), 1).otherwise(0)).alias("engaged_sessions"),
+        spark_sum(when(col("is_bounce"), 1).otherwise(0)).alias("bounced_sessions"),
+        avg("session_duration_sec").cast(DecimalType(10, 2)).alias("avg_session_duration_sec"),
+        avg("total_engagement_ms").cast(LongType()).alias("avg_engagement_time_ms"),
+        spark_sum("conversions").alias("total_conversions"),
+        spark_sum("total_value").alias("total_conversion_value"),
+        avg("event_count").cast(DecimalType(10, 2)).alias("avg_events_per_session")
+    ).withColumn(
+        "engagement_rate",
+        (col("engaged_sessions").cast("double") / col("total_sessions")).cast(DecimalType(5, 4))
+    ).withColumn(
+        "bounce_rate",
+        (col("bounced_sessions").cast("double") / col("total_sessions")).cast(DecimalType(5, 4))
+    ).withColumn(
+        "conversion_rate",
+        (col("total_conversions").cast("double") / col("total_sessions")).cast(DecimalType(5, 4))
+    ).withColumn(
+        "_computed_at", current_timestamp()
+    ).withColumn(
+        "_version", lit(1)
+    )
+
+    # Write
+    if mode == "full":
+        metrics.writeTo("iceberg.analytics.ga4_engagement_metrics").using("iceberg").createOrReplace()
+    else:
+        metrics.writeTo("iceberg.analytics.ga4_engagement_metrics").using("iceberg").append()
+
+    record_count = metrics.count()
+    logger.info(f"✅ Computed {record_count} engagement metric rows")
+    update_watermark(spark, "ga4_engagement_metrics", record_count)
+    return record_count
+
+
+def compute_ga4_page_performance(spark: SparkSession, mode: str = "incremental"):
+    """
+    Compute analytics.ga4_page_performance from staging.stg_ga4_events + stg_ga4_sessions.
+
+    CRITICAL GAP: Page-level metrics with bounce rate, engagement, and traffic attribution.
+    """
+    logger.info(f"Processing ga4_page_performance in {mode} mode")
+
+    # Create analytics table
+    spark.sql("""
+        CREATE TABLE IF NOT EXISTS iceberg.analytics.ga4_page_performance (
+            metric_date DATE,
+            page_location STRING,
+            page_title STRING,
+            page_views BIGINT,
+            unique_visitors BIGINT,
+            unique_sessions BIGINT,
+            avg_engagement_time_ms BIGINT,
+            entrances BIGINT,
+            exits BIGINT,
+            bounces BIGINT,
+            bounce_rate DECIMAL(5, 4),
+            avg_time_on_page_sec DECIMAL(10, 2),
+            traffic_source STRING,
+            traffic_medium STRING,
+            device_category STRING,
+            geo_country STRING,
+            _computed_at TIMESTAMP,
+            _version INT
+        )
+        USING iceberg
+        PARTITIONED BY (months(metric_date))
+    """)
+
+    # Read events and sessions
+    events_df = spark.table("iceberg.staging.stg_ga4_events").filter(col("event_name") == "page_view")
+    sessions_df = spark.table("iceberg.staging.stg_ga4_sessions")
+
+    # Compute page performance metrics
+    page_metrics = events_df.join(
+        sessions_df.select("session_id", "is_bounce", "landing_page", "exit_page"),
+        on="session_id",
+        how="left"
+    ).groupBy(
+        col("event_date").alias("metric_date"),
+        col("page_location"),
+        col("page_title"),
+        col("traffic_source"),
+        col("traffic_medium"),
+        col("device_category"),
+        col("geo_country")
+    ).agg(
+        count("*").alias("page_views"),
+        countDistinct("client_id").alias("unique_visitors"),
+        countDistinct("session_id").alias("unique_sessions"),
+        avg("engagement_time_ms").cast(LongType()).alias("avg_engagement_time_ms"),
+        spark_sum(when(col("landing_page") == col("page_location"), 1).otherwise(0)).alias("entrances"),
+        spark_sum(when(col("exit_page") == col("page_location"), 1).otherwise(0)).alias("exits"),
+        spark_sum(when((col("landing_page") == col("page_location")) & col("is_bounce"), 1).otherwise(0)).alias("bounces")
+    ).withColumn(
+        "bounce_rate",
+        when(col("entrances") > 0, (col("bounces").cast("double") / col("entrances"))).otherwise(lit(0)).cast(DecimalType(5, 4))
+    ).withColumn(
+        "avg_time_on_page_sec",
+        (col("avg_engagement_time_ms") / 1000.0).cast(DecimalType(10, 2))
+    ).withColumn(
+        "_computed_at", current_timestamp()
+    ).withColumn(
+        "_version", lit(1)
+    )
+
+    # Write
+    if mode == "full":
+        page_metrics.writeTo("iceberg.analytics.ga4_page_performance").using("iceberg").createOrReplace()
+    else:
+        page_metrics.writeTo("iceberg.analytics.ga4_page_performance").using("iceberg").append()
+
+    record_count = page_metrics.count()
+    logger.info(f"✅ Computed {record_count} page performance rows")
+    update_watermark(spark, "ga4_page_performance", record_count)
+    return record_count
+
+
+def compute_ga4_funnel_analysis(spark: SparkSession, mode: str = "incremental"):
+    """
+    Compute analytics.ga4_funnel_analysis from staging.stg_ga4_events.
+
+    CRITICAL GAP: Step-by-step conversion funnel with dropoff rates.
+    Funnel steps: page_view → view_item → add_to_cart → begin_checkout → purchase
+    """
+    logger.info(f"Processing ga4_funnel_analysis in {mode} mode")
+
+    # Create analytics table
+    spark.sql("""
+        CREATE TABLE IF NOT EXISTS iceberg.analytics.ga4_funnel_analysis (
+            metric_date DATE,
+            funnel_name STRING,
+            step_number INT,
+            step_name STRING,
+            step_users BIGINT,
+            step_sessions BIGINT,
+            step_completion_rate DECIMAL(5, 4),
+            dropoff_users BIGINT,
+            dropoff_rate DECIMAL(5, 4),
+            total_conversions BIGINT,
+            total_conversion_value DECIMAL(18, 2),
+            _computed_at TIMESTAMP,
+            _version INT
+        )
+        USING iceberg
+        PARTITIONED BY (funnel_name, months(metric_date))
+    """)
+
+    # Read events
+    events_df = spark.table("iceberg.staging.stg_ga4_events")
+
+    # Define e-commerce funnel steps
+    funnel_steps = [
+        (1, "page_view", "Landing"),
+        (2, "view_item", "Product View"),
+        (3, "add_to_cart", "Add to Cart"),
+        (4, "begin_checkout", "Begin Checkout"),
+        (5, "purchase", "Purchase")
+    ]
+
+    # Compute funnel by session (session-level aggregation)
+    funnel_events = events_df.filter(
+        col("event_name").isin([step[1] for step in funnel_steps])
+    ).groupBy("session_id", "event_date").agg(
+        spark_max(when(col("event_name") == "page_view", lit(1)).otherwise(lit(0))).alias("has_page_view"),
+        spark_max(when(col("event_name") == "view_item", lit(1)).otherwise(lit(0))).alias("has_view_item"),
+        spark_max(when(col("event_name") == "add_to_cart", lit(1)).otherwise(lit(0))).alias("has_add_to_cart"),
+        spark_max(when(col("event_name") == "begin_checkout", lit(1)).otherwise(lit(0))).alias("has_begin_checkout"),
+        spark_max(when(col("event_name") == "purchase", lit(1)).otherwise(lit(0))).alias("has_purchase"),
+        spark_sum(when(col("is_conversion"), col("event_value")).otherwise(lit(0))).alias("conversion_value"),
+        first("client_id").alias("client_id")
+    )
+
+    # Aggregate by date
+    funnel_daily = funnel_events.groupBy("event_date").agg(
+        spark_sum("has_page_view").alias("step1_users"),
+        spark_sum("has_view_item").alias("step2_users"),
+        spark_sum("has_add_to_cart").alias("step3_users"),
+        spark_sum("has_begin_checkout").alias("step4_users"),
+        spark_sum("has_purchase").alias("step5_users"),
+        count("session_id").alias("total_sessions"),
+        spark_sum("has_purchase").alias("total_conversions"),
+        spark_sum("conversion_value").alias("total_conversion_value")
+    )
+
+    # Create funnel rows for each step
+    from pyspark.sql.functions import array, explode, struct
+
+    funnel_results = []
+    for step_num, event_name, step_name in funnel_steps:
+        step_df = funnel_daily.select(
+            col("event_date").alias("metric_date"),
+            lit("ecommerce").alias("funnel_name"),
+            lit(step_num).alias("step_number"),
+            lit(step_name).alias("step_name"),
+            col(f"step{step_num}_users").alias("step_users"),
+            col("total_sessions").alias("step_sessions"),
+            (col(f"step{step_num}_users").cast("double") / col("step1_users")).cast(DecimalType(5, 4)).alias("step_completion_rate"),
+            (col(f"step{step_num}_users") - coalesce(col(f"step{step_num+1}_users") if step_num < 5 else lit(0), lit(0))).alias("dropoff_users"),
+            when(col(f"step{step_num}_users") > 0,
+                 ((col(f"step{step_num}_users") - coalesce(col(f"step{step_num+1}_users") if step_num < 5 else lit(0), lit(0))).cast("double") / col(f"step{step_num}_users"))
+            ).otherwise(lit(0)).cast(DecimalType(5, 4)).alias("dropoff_rate"),
+            col("total_conversions"),
+            col("total_conversion_value"),
+            current_timestamp().alias("_computed_at"),
+            lit(1).alias("_version")
+        )
+        funnel_results.append(step_df)
+
+    # Union all funnel steps
+    final_funnel = funnel_results[0]
+    for df in funnel_results[1:]:
+        final_funnel = final_funnel.union(df)
+
+    # Write
+    if mode == "full":
+        final_funnel.writeTo("iceberg.analytics.ga4_funnel_analysis").using("iceberg").createOrReplace()
+    else:
+        final_funnel.writeTo("iceberg.analytics.ga4_funnel_analysis").using("iceberg").append()
+
+    record_count = final_funnel.count()
+    logger.info(f"✅ Computed {record_count} funnel analysis rows")
+    update_watermark(spark, "ga4_funnel_analysis", record_count)
+    return record_count
+
+
+def compute_ga4_engagement_by_channel(spark: SparkSession, mode: str = "incremental"):
+    """
+    Compute analytics.ga4_engagement_by_channel from staging.stg_ga4_sessions.
+
+    Channel-level engagement metrics for attribution analysis.
+    """
+    logger.info(f"Processing ga4_engagement_by_channel in {mode} mode")
+
+    # Create analytics table
+    spark.sql("""
+        CREATE TABLE IF NOT EXISTS iceberg.analytics.ga4_engagement_by_channel (
+            metric_date DATE,
+            channel_group STRING,
+            traffic_source STRING,
+            traffic_medium STRING,
+            total_sessions BIGINT,
+            engaged_sessions BIGINT,
+            bounced_sessions BIGINT,
+            avg_session_duration_sec DECIMAL(10, 2),
+            total_conversions BIGINT,
+            total_conversion_value DECIMAL(18, 2),
+            engagement_rate DECIMAL(5, 4),
+            bounce_rate DECIMAL(5, 4),
+            conversion_rate DECIMAL(5, 4),
+            _computed_at TIMESTAMP,
+            _version INT
+        )
+        USING iceberg
+        PARTITIONED BY (channel_group, months(metric_date))
+    """)
+
+    # Read sessions
+    sessions_df = spark.table("iceberg.staging.stg_ga4_sessions")
+
+    # Compute by channel
+    channel_metrics = sessions_df.groupBy(
+        col("session_date").alias("metric_date"),
+        col("channel_group"),
+        col("traffic_source"),
+        col("traffic_medium")
+    ).agg(
+        count("*").alias("total_sessions"),
+        spark_sum(when(col("is_engaged_session"), 1).otherwise(0)).alias("engaged_sessions"),
+        spark_sum(when(col("is_bounce"), 1).otherwise(0)).alias("bounced_sessions"),
+        avg("session_duration_sec").cast(DecimalType(10, 2)).alias("avg_session_duration_sec"),
+        spark_sum("conversions").alias("total_conversions"),
+        spark_sum("total_value").alias("total_conversion_value")
+    ).withColumn(
+        "engagement_rate",
+        (col("engaged_sessions").cast("double") / col("total_sessions")).cast(DecimalType(5, 4))
+    ).withColumn(
+        "bounce_rate",
+        (col("bounced_sessions").cast("double") / col("total_sessions")).cast(DecimalType(5, 4))
+    ).withColumn(
+        "conversion_rate",
+        (col("total_conversions").cast("double") / col("total_sessions")).cast(DecimalType(5, 4))
+    ).withColumn(
+        "_computed_at", current_timestamp()
+    ).withColumn(
+        "_version", lit(1)
+    )
+
+    # Write
+    if mode == "full":
+        channel_metrics.writeTo("iceberg.analytics.ga4_engagement_by_channel").using("iceberg").createOrReplace()
+    else:
+        channel_metrics.writeTo("iceberg.analytics.ga4_engagement_by_channel").using("iceberg").append()
+
+    record_count = channel_metrics.count()
+    logger.info(f"✅ Computed {record_count} channel metric rows")
+    update_watermark(spark, "ga4_engagement_by_channel", record_count)
+    return record_count
+
+
 # Mapping of table names to compute functions
 ANALYTICS_FUNCTIONS = {
     "customer_metrics": compute_customer_metrics,
     "order_summary": compute_order_summary,
     "payment_metrics": compute_payment_metrics,
     "campaign_metrics": compute_campaign_metrics,
+    "ga4_engagement_metrics": compute_ga4_engagement_metrics,
+    "ga4_engagement_by_channel": compute_ga4_engagement_by_channel,
+    "ga4_page_performance": compute_ga4_page_performance,
+    "ga4_funnel_analysis": compute_ga4_funnel_analysis,
 }
 
 
