@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-End-to-end data pipeline integrating Shopify, Stripe, and HubSpot webhooks through a unified Apache Iceberg lakehouse. Combines real-time streaming (Flink) with batch processing (Spark), entity resolution, and monitoring (Grafana/Prometheus). Runs entirely in Docker (13+ services).
+End-to-end data pipeline integrating five sources through a unified Apache Iceberg lakehouse: Shopify, Stripe, HubSpot, and Mailchimp arrive as webhooks; GA4 arrives as batch Parquet exports (standing in for a BigQuery Export). Combines real-time streaming (Flink) with batch processing (Spark), entity resolution, and monitoring (Grafana/Prometheus). Runs entirely in Docker (13+ services).
 
 ## Tech Stack
 
@@ -29,7 +29,9 @@ airflow/dags/            # Airflow DAG definitions
 ingestion/app/           # FastAPI webhook ingestion service
 datagen/                 # Mock data generators and webhook simulator
 monitoring/              # Prometheus alerts, Grafana dashboards
-scripts/                 # Automation scripts (reset_and_run.sh, validate_tables.sh)
+scripts/                 # Automation scripts (reset_and_run.sh, run_tests.sh, validate_tables.sh)
+tests/                   # Pytest suite (conftest.py fixtures, pipeline_tables.py DDL helpers)
+requirements-dev.txt     # Test dependencies
 schemas/                 # API JSON schemas
 docs/                    # Architecture docs, diagrams, runbook
 ```
@@ -56,12 +58,19 @@ Five-layer medallion architecture:
 
 ```
 Webhooks → FastAPI → Redpanda → Flink (streaming) → raw (Iceberg)
+GA4 Parquet ────────→ Spark ga4_batch_ingest.py ──→ raw (Iceberg)
   → Spark staging_batch.py       → staging layer
   → Spark entity_backfill.py     → semantic layer (entity resolution)
   → Spark core_views.py          → core layer (unified objects)
   → Spark analytics_incremental.py → analytics layer
   → Spark marts_incremental.py   → marts layer → Grafana dashboards
 ```
+
+Two ingress paths converge on the raw layer. The four webhook sources stream
+through Flink; GA4 is batch-only — `datagen/` writes Parquet to the volume
+mounted at `/opt/spark/data`, and `ga4_batch_ingest.py` MERGEs it into
+`raw.ga4_events` keyed on `_raw_id`, so re-running a file is idempotent. From
+staging onward every source follows the same path.
 
 Airflow orchestrates batch jobs on a 4-hour schedule by default.
 
@@ -105,11 +114,31 @@ All configuration lives in `infrastructure/.env` (137 parameters). Template at `
 
 ## Testing and Validation
 
-- `scripts/validate_tables.sh` — row count validation across all layers
+```bash
+./scripts/run_tests.sh                        # whole suite
+./scripts/run_tests.sh tests/test_ga4_dedup.py
+./scripts/run_tests.sh -k dedup -vv           # pytest args pass through
+```
+
+- Pytest suite in `tests/`, dependencies in `requirements-dev.txt`
+- Tests run inside the `infrastructure-spark-master` image (Java 11, Spark 3.5.3,
+  Iceberg 1.5.0). Running them on the host would need a JDK plus a matching local
+  PySpark, so always go through the script
+- No other service needs to be up: `tests/conftest.py` registers a hadoop-type
+  Iceberg catalog named `iceberg` in a temp dir, so MinIO, Postgres, and the REST
+  catalog can all be down
+- `tests/pipeline_tables.py` holds the DDL for every source table plus
+  `insert_rows()`, which builds DataFrames from the table's own schema. Use it
+  rather than `spark.createDataFrame(pd.DataFrame(...))` — inference fails on
+  all-NULL columns and mistypes decimals
+- The `pipeline_tables` fixture creates all five staging sources even when a test
+  populates only one, because `get_all_staging_customers()` unions across all of them
+- `tests/test_ga4_e2e.py` calls the same functions the Airflow DAG invokes, so
+  caller/callee signature drift fails there rather than in a scheduled run
+- `scripts/validate_tables.sh` — row count validation against a running stack
 - Docker health checks on all services
 - Faker-based mock data in `datagen/` for realistic test data
 - `--dry-run` mode on entity backfill
-- No formal unit test framework yet; validation is end-to-end
 
 ## Key Design Decisions
 

@@ -48,7 +48,8 @@ As I tyied to make the pipeline more real, I fell into the rabbit hole of settin
 ## Overview
 
 This demo simulates a modern data platform that:
-- Ingests data from **Shopify**(e-commerce store), **Stripe**(payment), and **HubSpot**(CRM) via webhooks
+- Ingests data from **Shopify**(e-commerce store), **Stripe**(payment), **HubSpot**(CRM), and **Mailchimp**(email marketing) via webhooks
+- Ingests **GA4**(web analytics) from Parquet exports in batch, standing in for a BigQuery Export
 - Stores data in **Apache Iceberg** tables with PostgreSQL catalog backend
 - Uses **Flink SQL** for real-time streaming from Kafka to Iceberg raw layer
 - Uses **Spark** for batch processing through staging → semantic → analytics → marts
@@ -358,11 +359,15 @@ docker exec -it iceberg-spark-master /opt/spark/bin/spark-sql \
 
 | Layer | Description | Tables |
 |-------|-------------|--------|
-| **Raw** | Append-only webhook events | `raw.shopify_orders`, `raw.shopify_customers`, `raw.stripe_charges`, `raw.stripe_customers`, `raw.hubspot_contacts` |
-| **Staging** | Cleaned and typed data | `staging.stg_shopify_orders`, `staging.stg_shopify_customers`, `staging.stg_stripe_charges`, `staging.stg_stripe_customers`, `staging.stg_hubspot_contacts` |
+| **Raw** | Append-only source events | `raw.shopify_orders`, `raw.shopify_customers`, `raw.stripe_charges`, `raw.stripe_customers`, `raw.hubspot_contacts`, `raw.mailchimp_campaigns`, `raw.mailchimp_events`, `raw.mailchimp_subscribers`, `raw.ga4_events` |
+| **Staging** | Cleaned and typed data | `staging.stg_shopify_orders`, `staging.stg_shopify_customers`, `staging.stg_stripe_charges`, `staging.stg_stripe_customers`, `staging.stg_hubspot_contacts`, `staging.stg_mailchimp_campaigns`, `staging.stg_mailchimp_events`, `staging.stg_mailchimp_subscribers`, `staging.stg_ga4_events`, `staging.stg_ga4_sessions` |
 | **Semantic** | Entity resolution | `semantic.entity_index`, `semantic.blocking_index` |
-| **Analytics** | Aggregated metrics | `analytics.customer_metrics`, `analytics.order_summary`, `analytics.payment_metrics` |
-| **Marts** | Business-ready views | `marts.customer_360`, `marts.sales_dashboard_daily` |
+| **Analytics** | Aggregated metrics | `analytics.customer_metrics`, `analytics.order_summary`, `analytics.payment_metrics`, `analytics.campaign_metrics`, `analytics.ga4_engagement_metrics`, `analytics.ga4_engagement_by_channel`, `analytics.ga4_page_performance`, `analytics.ga4_funnel_analysis` |
+| **Marts** | Business-ready views | `marts.customer_360`, `marts.sales_dashboard_daily`, `marts.campaign_dashboard`, `marts.ga4_engagement_dashboard` |
+
+All layers except raw arrive via Spark batch jobs. Raw is fed by Flink SQL for the
+four webhook sources, and by `ga4_batch_ingest.py` for GA4, which reads Parquet
+exports from the volume mounted at `/opt/spark/data`.
 
 ## Configuration
 
@@ -386,6 +391,36 @@ STRIPE_CUSTOMERS=30
 STRIPE_CHARGES=80
 HUBSPOT_CONTACTS=40
 ```
+
+## Testing
+
+```bash
+# Whole suite (30 tests)
+./scripts/run_tests.sh
+
+# One file, or any pytest arguments
+./scripts/run_tests.sh tests/test_ga4_dedup.py
+./scripts/run_tests.sh -k dedup -vv
+```
+
+Tests run inside the project's Spark image, which already carries Java 11, Spark
+3.5.3, and the Iceberg runtime jars. Nothing else needs to be running: the suite
+uses a hadoop-type Iceberg catalog in a temp directory, so MinIO, Postgres, and
+the REST catalog can all be down. The script builds the image if it is missing.
+
+| Suite | Covers |
+|-------|--------|
+| `tests/test_ga4_provider.py` | GA4 export generation: schema, timestamps, session coherence, seed reproducibility |
+| `tests/test_ga4_dedup.py` | Staging deduplication in both full and incremental modes |
+| `tests/test_ga4_entity_resolution.py` | GA4 users joining entity resolution; blocking-index cardinality |
+| `tests/test_ga4_e2e.py` | Parquet → raw → staging → semantic → analytics → marts, plus ingest idempotency |
+
+The end-to-end suite calls the same functions the Airflow DAG invokes, so a
+signature drift between a job and its caller fails here rather than in a
+scheduled run.
+
+For row-count validation against a *running* stack, use
+`./scripts/validate_tables.sh` instead.
 
 ## Troubleshooting
 
@@ -468,8 +503,13 @@ iceberg-incremental-demo/
 │   └── 05_marts/
 ├── scripts/                     # Utility scripts
 │   ├── reset_and_run.sh         # Main setup script (--help for options)
+│   ├── run_tests.sh             # Run the test suite in the Spark image
 │   ├── validate_tables.sh       # Quick table validation
 │   └── post_mock_data.py        # Mock data generator
+├── tests/                       # Pytest suite
+│   ├── conftest.py              # SparkSession and sample-data fixtures
+│   └── pipeline_tables.py       # Iceberg DDL and row-insert helpers
+├── requirements-dev.txt         # Test dependencies
 └── schemas/                     # API JSON schemas
 ```
 
