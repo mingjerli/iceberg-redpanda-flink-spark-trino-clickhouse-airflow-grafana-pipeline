@@ -401,6 +401,10 @@ generate_mock_data() {
     log_info "GA4: $GA4_EXPORT_FILES export files, $GA4_SESSIONS_PER_FILE sessions/file (Parquet batch)"
     echo ""
 
+    # Keep the full output so the failure count survives the grep below.
+    local post_log
+    post_log=$(mktemp)
+
     "$PYTHON_CMD" scripts/post_mock_data.py \
         --url http://localhost:8090 \
         --shopify-customers "$SHOPIFY_CUSTOMERS" \
@@ -411,7 +415,21 @@ generate_mock_data() {
         --mailchimp-subscribers "$MAILCHIMP_SUBSCRIBERS" \
         --mailchimp-campaigns "$MAILCHIMP_CAMPAIGNS" \
         --mailchimp-events "$MAILCHIMP_EVENTS" \
-        --seed 42 2>&1 | grep -E "Posted|Total|Summary" || true
+        --seed 42 2>&1 | tee "$post_log" | grep -E "Posted|Total|Summary" || true
+
+    # post_mock_data.py reports its own failures, but piping into grep replaces
+    # its exit status with grep's and `|| true` discards even that. A run where
+    # every POST returned 500 therefore looked identical to a clean one, and the
+    # script went on to submit Flink jobs against topics that were empty.
+    local failed_posts
+    failed_posts=$(grep -oE "Total Failed: [0-9]+" "$post_log" | grep -oE "[0-9]+$" | tail -1)
+    rm -f "$post_log"
+
+    if [ "${failed_posts:-0}" -gt 0 ]; then
+        log_fail "Ingestion API rejected $failed_posts webhook posts -- nothing reached Redpanda"
+        log_info "Inspect with: docker logs iceberg-ingestion-api --tail 50"
+        exit 1
+    fi
 
     log_success "Mock data generated"
 }
@@ -452,11 +470,20 @@ submit_flink_jobs() {
             fi
         done
 
-        # Check Redpanda messages
+        # Check Redpanda messages.
+        #
+        # Sum the per-partition high watermarks rather than consuming.
+        # `rpk topic consume --num 1` blocks until a message arrives, so an
+        # empty topic hangs this loop forever instead of reporting the very
+        # failure it exists to catch -- and `timeout` is not available on macOS.
+        # `describe` is a metadata read: it returns immediately, and 0 is a
+        # perfectly good answer.
         for topic in shopify.orders shopify.customers stripe.charges stripe.customers hubspot.contacts mailchimp.campaigns mailchimp.events mailchimp.subscribers; do
-            local msg_count=$(docker exec iceberg-redpanda rpk topic consume "$topic" --num 1 --format json 2>/dev/null | wc -l)
-            if [ "$msg_count" -gt 0 ]; then
-                log_success "Messages in Redpanda topic: $topic"
+            local msg_count
+            msg_count=$(docker exec iceberg-redpanda rpk topic describe "$topic" -p 2>/dev/null \
+                | awk 'NR>1 && $NF ~ /^[0-9]+$/ {sum += $NF} END {print sum+0}')
+            if [ "${msg_count:-0}" -gt 0 ]; then
+                log_success "Messages in Redpanda topic: $topic ($msg_count)"
             else
                 log_fail "No messages in topic: $topic"
             fi

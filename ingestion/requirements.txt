@@ -17,7 +17,12 @@ pydantic-settings>=2.0.0,<3.0.0
 python-multipart>=0.0.6,<1.0.0  # For form data
 
 # Monitoring
-prometheus-fastapi-instrumentator>=6.0.0,<7.0.0
+# Must stay >=8: the 6.x middleware reads `route.path` off every route, which
+# raises AttributeError on the `_IncludedRouter` objects Starlette >=1.4 puts
+# there. The fastapi pin above has no tight upper bound, so a fresh build pulls
+# a Starlette new enough to trigger it -- and then *every* request 500s,
+# webhooks included, so no data reaches Redpanda at all.
+prometheus-fastapi-instrumentator>=8.0.0,<9.0.0
 
 # Optional: For testing
 httpx>=0.26.0,<1.0.0
