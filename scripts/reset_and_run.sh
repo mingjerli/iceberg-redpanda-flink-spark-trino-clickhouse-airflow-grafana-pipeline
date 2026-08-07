@@ -31,8 +31,6 @@
 #   MAILCHIMP_SUBSCRIBERS Number of Mailchimp subscribers (default: 100)
 #   MAILCHIMP_CAMPAIGNS   Number of Mailchimp campaigns (default: 20)
 #   MAILCHIMP_EVENTS      Number of Mailchimp events (default: 500)
-#   GA4_EXPORT_FILES      Number of GA4 export files (default: 3)
-#   GA4_SESSIONS_PER_FILE Number of GA4 sessions per file (default: 20)
 # =============================================================================
 
 set -e
@@ -71,8 +69,6 @@ HUBSPOT_CONTACTS=${HUBSPOT_CONTACTS:-40}
 MAILCHIMP_SUBSCRIBERS=${MAILCHIMP_SUBSCRIBERS:-100}
 MAILCHIMP_CAMPAIGNS=${MAILCHIMP_CAMPAIGNS:-20}
 MAILCHIMP_EVENTS=${MAILCHIMP_EVENTS:-500}
-GA4_EXPORT_FILES=${GA4_EXPORT_FILES:-3}
-GA4_SESSIONS_PER_FILE=${GA4_SESSIONS_PER_FILE:-20}
 
 # Colors
 RED='\033[0;31m'
@@ -116,8 +112,6 @@ for arg in "$@"; do
             echo "  MAILCHIMP_SUBSCRIBERS Number of Mailchimp subscribers (default: 100)"
             echo "  MAILCHIMP_CAMPAIGNS   Number of Mailchimp campaigns (default: 20)"
             echo "  MAILCHIMP_EVENTS      Number of Mailchimp events (default: 500)"
-            echo "  GA4_EXPORT_FILES      Number of GA4 export files (default: 3)"
-            echo "  GA4_SESSIONS_PER_FILE Number of GA4 sessions per file (default: 20)"
             exit 0
             ;;
     esac
@@ -194,6 +188,37 @@ check_table_exists() {
     local count=$(docker exec iceberg-airflow-postgres psql -U airflow -d iceberg_catalog -t -c \
         "SELECT COUNT(*) FROM iceberg_tables WHERE table_namespace = '$namespace' AND table_name = '$table';" 2>/dev/null | tr -d ' ')
     [ "${count:-0}" -ge 1 ]
+}
+
+# Run a Spark job and report its real outcome.
+#
+# `cmd 2>&1 | tail -N` yields tail's exit status, never the job's, so the
+# `|| log_warning` guards that used to wrap these calls could not fire and a
+# hard failure was still announced with log_success. That is how a broken
+# entity-resolution run and an ingest reading a nonexistent path both reported
+# themselves complete while leaving every downstream layer empty.
+run_spark_job() {
+    local description=$1
+    shift
+
+    local job_log status=0
+    job_log=$(mktemp)
+
+    # `|| status=$?` keeps `set -e` from aborting before we can report.
+    $SPARK_SUBMIT "$@" > "$job_log" 2>&1 || status=$?
+
+    tail -3 "$job_log"
+
+    if [ "$status" -ne 0 ]; then
+        log_fail "$description failed (exit $status)"
+        echo "  ---- last 25 lines ----"
+        tail -25 "$job_log" | sed 's/^/  /'
+        rm -f "$job_log"
+        return 1
+    fi
+
+    rm -f "$job_log"
+    return 0
 }
 
 # =============================================================================
@@ -369,27 +394,32 @@ generate_mock_data() {
     PYTHON_CMD="python3"
     VENV_DIR="$PROJECT_DIR/.venv"
 
-    # Setup virtual environment if dependencies not available
-    if ! python3 -c "import click, httpx, faker" 2>/dev/null; then
+    # Install from the declared requirements files rather than a hand-kept list.
+    # That list had drifted from what the code actually imports -- it lacked
+    # pandas/pyarrow (the GA4 Parquet writer) and orjson, so GA4 generation died
+    # on whichever was missing first. The two files together cover click,
+    # orjson, tqdm, pandas, pyarrow, httpx and faker.
+    #
+    # Install errors are no longer sent to /dev/null: a silent failure here
+    # surfaces much later as a confusing ModuleNotFoundError.
+    local req_datagen="$PROJECT_DIR/datagen/requirements.txt"
+    local req_scripts="$PROJECT_DIR/scripts/requirements.txt"
+
+    if ! python3 -c "import click, httpx, faker, orjson, pandas, pyarrow" 2>/dev/null; then
         log_step "Setting up Python environment..."
 
         if command -v uv &>/dev/null; then
             log_info "Using uv to create virtual environment..."
             uv venv "$VENV_DIR" 2>/dev/null || true
-            uv pip install --quiet click httpx faker 2>/dev/null
+            uv pip install --quiet --python "$VENV_DIR/bin/python" \
+                -r "$req_datagen" -r "$req_scripts"
             PYTHON_CMD="$VENV_DIR/bin/python"
             log_success "Dependencies installed with uv"
-        elif [ -d "$VENV_DIR" ]; then
-            source "$VENV_DIR/bin/activate"
-            pip install --quiet click httpx faker 2>/dev/null
-            PYTHON_CMD="$VENV_DIR/bin/python"
-            log_success "Dependencies installed in existing venv"
         else
-            log_info "Creating virtual environment..."
-            python3 -m venv "$VENV_DIR"
-            "$VENV_DIR/bin/pip" install --quiet click httpx faker
+            [ -d "$VENV_DIR" ] || { log_info "Creating virtual environment..."; python3 -m venv "$VENV_DIR"; }
+            "$VENV_DIR/bin/pip" install --quiet -r "$req_datagen" -r "$req_scripts"
             PYTHON_CMD="$VENV_DIR/bin/python"
-            log_success "Dependencies installed in new venv"
+            log_success "Dependencies installed in venv"
         fi
     fi
 
@@ -398,7 +428,7 @@ generate_mock_data() {
     log_info "Stripe:  $STRIPE_CUSTOMERS customers, $STRIPE_CHARGES charges"
     log_info "HubSpot: $HUBSPOT_CONTACTS contacts"
     log_info "Mailchimp: $MAILCHIMP_SUBSCRIBERS subscribers, $MAILCHIMP_CAMPAIGNS campaigns, $MAILCHIMP_EVENTS events"
-    log_info "GA4: $GA4_EXPORT_FILES export files, $GA4_SESSIONS_PER_FILE sessions/file (Parquet batch)"
+    log_info "GA4: one Parquet export (generator default: 200 users, 3-20 events each)"
     echo ""
 
     # Keep the full output so the failure count survives the grep below.
@@ -430,6 +460,32 @@ generate_mock_data() {
         log_info "Inspect with: docker logs iceberg-ingestion-api --tail 50"
         exit 1
     fi
+
+    # GA4 is the one source that is not a webhook: it arrives as a Parquet
+    # export, standing in for a BigQuery Export. Without this step nothing ever
+    # writes datagen/output/ga4/, so ga4_batch_ingest.py reads a path that does
+    # not exist and every GA4 table downstream stays empty.
+    #
+    # The generator is driven from datagen/ because it imports its providers by
+    # relative path, and writes ga4/events.parquet -- which docker-compose
+    # mounts read-only at $GA4_EXPORT_PATH inside the Spark containers.
+    echo ""
+    log_step "Generating GA4 Parquet export..."
+    (
+        cd "$PROJECT_DIR/datagen" && \
+        "$PYTHON_CMD" generator.py \
+            --source ga4 \
+            --output-dir ./output \
+            --seed 42 2>&1 | grep -E "Saved|events|Error|error" || true
+    )
+
+    local ga4_export="$PROJECT_DIR/datagen/output/ga4/events.parquet"
+    if [ ! -f "$ga4_export" ]; then
+        log_fail "GA4 export not written to $ga4_export"
+        log_info "Check the generator output above; deps come from datagen/requirements.txt"
+        exit 1
+    fi
+    log_success "GA4 export written: $(basename "$ga4_export")"
 
     log_success "Mock data generated"
 }
@@ -552,22 +608,26 @@ run_batch_pipeline() {
     log_info "Ingesting GA4 Parquet exports to raw layer"
     # --input is required; --mode accepts append|overwrite only. MERGE INTO on
     # _raw_id keeps re-runs idempotent, so append is safe on a reset.
-    $SPARK_SUBMIT /opt/spark/jobs/ga4_batch_ingest.py \
+    if run_spark_job "GA4 batch ingest" /opt/spark/jobs/ga4_batch_ingest.py \
         --input "${GA4_EXPORT_PATH:-/opt/spark/data/ga4/events.parquet}" \
-        --mode append 2>&1 | tail -3 || {
-        log_warning "GA4 batch ingest had issues"
-    }
-    log_success "GA4 batch ingest complete"
+        --mode append; then
+        log_success "GA4 batch ingest complete"
+    fi
 
     echo ""
     log_step "Running staging batch jobs..."
-    for table in shopify_orders shopify_customers stripe_charges stripe_customers hubspot_contacts mailchimp_campaigns mailchimp_events mailchimp_subscribers stg_ga4_events stg_ga4_sessions; do
+    # These are STAGING_FUNCTIONS keys, not table names -- no stg_ prefix.
+    # `--table stg_ga4_events` is rejected by argparse before Spark starts.
+    for table in shopify_orders shopify_customers stripe_charges stripe_customers hubspot_contacts mailchimp_campaigns mailchimp_events mailchimp_subscribers ga4_events ga4_sessions; do
         log_info "Processing: $table"
-        $SPARK_SUBMIT /opt/spark/jobs/staging_batch.py --table $table --mode full 2>&1 | tail -3 || {
-            log_warning "Failed to process $table"
-        }
+        run_spark_job "Staging $table" /opt/spark/jobs/staging_batch.py \
+            --table "$table" --mode full || staging_failed=1
     done
-    log_success "Staging complete"
+    if [ "${staging_failed:-0}" -eq 0 ]; then
+        log_success "Staging complete"
+    else
+        log_fail "Staging finished with failures -- downstream layers will be incomplete"
+    fi
 
     if [ "$VALIDATE_MODE" = true ]; then
         for table in stg_shopify_orders stg_shopify_customers stg_stripe_charges stg_stripe_customers stg_hubspot_contacts stg_mailchimp_campaigns stg_mailchimp_events stg_mailchimp_subscribers stg_ga4_events stg_ga4_sessions; do
@@ -581,10 +641,9 @@ run_batch_pipeline() {
 
     echo ""
     log_step "Running entity resolution..."
-    $SPARK_SUBMIT /opt/spark/jobs/entity_backfill.py --mode initial 2>&1 | tail -5 || {
-        log_warning "Entity backfill had issues"
-    }
-    log_success "Entity resolution complete"
+    if run_spark_job "Entity resolution" /opt/spark/jobs/entity_backfill.py --mode initial; then
+        log_success "Entity resolution complete"
+    fi
 
     if [ "$VALIDATE_MODE" = true ]; then
         for table in entity_index blocking_index; do
@@ -598,17 +657,15 @@ run_batch_pipeline() {
 
     echo ""
     log_step "Creating core views..."
-    $SPARK_SUBMIT /opt/spark/jobs/core_views.py 2>&1 | tail -5 || {
-        log_warning "Core views creation had issues"
-    }
-    log_success "Core views created"
+    if run_spark_job "Core views" /opt/spark/jobs/core_views.py; then
+        log_success "Core views created"
+    fi
 
     echo ""
     log_step "Running analytics transforms..."
-    $SPARK_SUBMIT /opt/spark/jobs/analytics_incremental.py --mode full 2>&1 | tail -5 || {
-        log_warning "Analytics transforms had issues"
-    }
-    log_success "Analytics complete"
+    if run_spark_job "Analytics transforms" /opt/spark/jobs/analytics_incremental.py --mode full; then
+        log_success "Analytics complete"
+    fi
 
     if [ "$VALIDATE_MODE" = true ]; then
         for table in customer_metrics order_summary payment_metrics campaign_metrics ga4_engagement_metrics ga4_engagement_by_channel ga4_page_performance ga4_funnel_analysis; do
@@ -622,10 +679,9 @@ run_batch_pipeline() {
 
     echo ""
     log_step "Running marts transforms..."
-    $SPARK_SUBMIT /opt/spark/jobs/marts_incremental.py --mode full 2>&1 | tail -5 || {
-        log_warning "Marts transforms had issues"
-    }
-    log_success "Marts complete"
+    if run_spark_job "Marts transforms" /opt/spark/jobs/marts_incremental.py --mode full; then
+        log_success "Marts complete"
+    fi
 
     if [ "$VALIDATE_MODE" = true ]; then
         for table in customer_360 sales_dashboard_daily campaign_dashboard ga4_engagement_dashboard; do

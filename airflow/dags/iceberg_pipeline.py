@@ -145,13 +145,16 @@ with DAG(
     # -------------------------------------------------------------------------
     # GA4 Staging: Raw -> Staging
     # -------------------------------------------------------------------------
+    # --table takes the STAGING_FUNCTIONS key, which carries no stg_ prefix
+    # (`ga4_events`, not `stg_ga4_events`). The prefixed form is the Iceberg
+    # table name; passing it here is rejected by argparse before Spark starts.
     stg_ga4_events = BashOperator(
         task_id="stg_ga4_events",
-        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/staging_batch.py --table stg_ga4_events --mode incremental",
+        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/staging_batch.py --table ga4_events --mode incremental",
     )
     stg_ga4_sessions = BashOperator(
         task_id="stg_ga4_sessions",
-        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/staging_batch.py --table stg_ga4_sessions --mode incremental",
+        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/staging_batch.py --table ga4_sessions --mode incremental",
     )
 
     # -------------------------------------------------------------------------
