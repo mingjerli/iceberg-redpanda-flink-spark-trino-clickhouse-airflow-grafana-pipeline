@@ -147,9 +147,12 @@ services:
       - --advertise-rpc-addr=redpanda:33145
     ports:
       - "${EXTERNAL_REDPANDA_BROKER_PORT:-19092}:19092"
-      - "8081:8081"  # Schema Registry
-      - "8082:8082"  # HTTP Proxy
-      - "9644:9644"  # Admin API
+      # Host ports are configurable so a local dev server on 8081/8082 does not
+      # block the stack. Container-internal addresses stay on the default ports,
+      # so redpanda:8081 / redpanda:9644 keep working for other services.
+      - "${EXTERNAL_REDPANDA_SCHEMA_REGISTRY_PORT:-8081}:8081"  # Schema Registry
+      - "${EXTERNAL_REDPANDA_HTTP_PROXY_PORT:-8082}:8082"  # HTTP Proxy
+      - "${EXTERNAL_REDPANDA_ADMIN_PORT:-9644}:9644"  # Admin API
     volumes:
       - redpanda-data:/var/lib/redpanda/data
     healthcheck:
