@@ -27,25 +27,36 @@ from typing import Optional
 
 from pyspark.sql import SparkSession
 from pyspark.sql import Window
+# count/first/max/min/sum shadow Python builtins. That is intentional and safe
+# here: this module uses them only as Spark column functions, never as builtins.
 from pyspark.sql.functions import (
     col,
     coalesce,
     concat,
+    count,
     current_date,
     current_timestamp,
     datediff,
     expr,
+    first,
     get_json_object,
+    hour,
+    lag,
     length,
     lit,
     lower,
+    max,
+    min,
     regexp_replace,
     round as spark_round,
     row_number,
     size,
     split,
+    sum,
     to_date,
     trim,
+    udf,
+    unix_timestamp,
     upper,
     when,
 )
@@ -1176,11 +1187,15 @@ def stage_ga4_events(spark, mode="incremental"):
         ) USING iceberg PARTITIONED BY (months(event_timestamp))
     """)
 
+    raw_df = spark.table("iceberg.raw.ga4_events")
+
     if mode == "incremental":
-        watermark_ts = get_watermark_timestamp(spark, "stg_ga4_events")
-        raw_df = spark.table("iceberg.raw.ga4_events").filter(col("_loaded_at") > watermark_ts)
-    else:
-        raw_df = spark.table("iceberg.raw.ga4_events")
+        watermark = get_watermark(spark, "stg_ga4_events")
+        if watermark:
+            raw_df = raw_df.filter(col("_loaded_at") > watermark)
+            logger.info(f"Incremental filter: _loaded_at > {watermark}")
+        else:
+            logger.info("No watermark found, processing all data")
 
     if raw_df.count() == 0:
         logger.info("No new GA4 events"); return 0
@@ -1215,10 +1230,10 @@ def stage_ga4_events(spark, mode="incremental"):
     else:
         staged_df.writeTo("iceberg.staging.stg_ga4_events").using("iceberg").append()
 
-    count = staged_df.count()
-    logger.info(f"✅ Staged {count} GA4 events")
-    update_watermark(spark, "stg_ga4_events", count)
-    return count
+    record_count = staged_df.count()
+    logger.info(f"✅ Staged {record_count} GA4 events")
+    update_watermark(spark, "stg_ga4_events", record_count)
+    return record_count
 
 
 def compute_ga4_sessions(spark, mode="incremental"):
@@ -1299,10 +1314,10 @@ def compute_ga4_sessions(spark, mode="incremental"):
     else:
         sessions.writeTo("iceberg.staging.stg_ga4_sessions").using("iceberg").append()
 
-    count = sessions.count()
-    logger.info(f"✅ Computed {count} sessions")
-    update_watermark(spark, "stg_ga4_sessions", count)
-    return count
+    record_count = sessions.count()
+    logger.info(f"✅ Computed {record_count} sessions")
+    update_watermark(spark, "stg_ga4_sessions", record_count)
+    return record_count
 
 
 # Mapping of table names to staging functions

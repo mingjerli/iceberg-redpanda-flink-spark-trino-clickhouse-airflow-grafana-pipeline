@@ -37,6 +37,10 @@ SPARK_MASTER = os.environ.get("SPARK_MASTER", "spark://spark-master:7077")
 MINIO_ROOT_USER = os.environ.get("MINIO_ROOT_USER", "admin")
 MINIO_ROOT_PASSWORD = os.environ.get("MINIO_ROOT_PASSWORD", "admin123")
 
+# GA4 arrives as Parquet on the volume mounted into the Spark containers,
+# standing in for a BigQuery Export. Default matches infrastructure/.env.example.
+GA4_EXPORT_PATH = os.environ.get("GA4_EXPORT_PATH", "/opt/spark/data/ga4/events.parquet")
+
 SPARK_SUBMIT = (
     f"docker exec {SPARK_CONTAINER} /opt/spark/bin/spark-submit "
     f"--master {SPARK_MASTER} "
@@ -130,7 +134,12 @@ with DAG(
     # -------------------------------------------------------------------------
     ga4_batch_ingest = BashOperator(
         task_id="ga4_batch_ingest",
-        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/ga4_batch_ingest.py --mode incremental",
+        # --input is required; MERGE INTO on _raw_id makes re-runs idempotent,
+        # so append is the correct mode for a scheduled task.
+        bash_command=(
+            f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/ga4_batch_ingest.py "
+            f"--input {GA4_EXPORT_PATH} --mode append"
+        ),
     )
 
     # -------------------------------------------------------------------------

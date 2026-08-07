@@ -1048,8 +1048,12 @@ def build_ga4_engagement_dashboard(spark: SparkSession, mode: str = "incremental
 
     # Get top traffic source and device per day
     from pyspark.sql import Window as W
-    traffic_win = W.partitionBy("session_date", "traffic_source").orderBy(col("session_count").desc())
-    device_win = W.partitionBy("session_date", "device_category").orderBy(col("session_count").desc())
+    # Partition by the date alone. Including the ranked dimension in the
+    # partition puts every group in a window of its own, so row_number() == 1
+    # keeps every row rather than the top one -- and the joins below then fan
+    # the dashboard out to one row per date x source x device x country.
+    traffic_win = W.partitionBy("session_date").orderBy(col("session_count").desc())
+    device_win = W.partitionBy("session_date").orderBy(col("session_count").desc())
 
     top_traffic = sessions_df.groupBy("session_date", "traffic_source").agg(
         count("*").alias("session_count")
@@ -1066,7 +1070,7 @@ def build_ga4_engagement_dashboard(spark: SparkSession, mode: str = "incremental
     )
 
     # Get top country per day
-    country_win = W.partitionBy("session_date", "geo_country").orderBy(col("session_count").desc())
+    country_win = W.partitionBy("session_date").orderBy(col("session_count").desc())
     top_country = sessions_df.groupBy("session_date", "geo_country").agg(
         count("*").alias("session_count")
     ).withColumn("rn", row_number().over(country_win)).filter(col("rn") == 1).select(

@@ -11,8 +11,10 @@ For the demo, we read Parquet files from the mounted volume.
 """
 import argparse
 import logging
+from datetime import datetime
+
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import current_timestamp, input_file_name, sha2, concat_ws, col
+from pyspark.sql.functions import col, concat_ws, lit, sha2
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -72,9 +74,16 @@ def ingest_ga4_export(spark, input_path, mode="append"):
         sha2(concat_ws("|", col("client_id"), col("event_timestamp").cast("string"), col("event_name")), 256)
     )
 
-    # Add ingestion metadata
-    df = df.withColumn("_loaded_at", current_timestamp()) \
-           .withColumn("_source_file", input_file_name())
+    # Add ingestion metadata.
+    #
+    # These must be deterministic expressions: Spark rejects a MERGE whose
+    # source plan contains current_timestamp() or input_file_name() with
+    # INVALID_NON_DETERMINISTIC_EXPRESSIONS, because the source is scanned more
+    # than once and every scan has to agree. Stamping one Python-side timestamp
+    # and the known input path keeps the source stable across scans.
+    loaded_at = datetime.now()
+    df = df.withColumn("_loaded_at", lit(loaded_at).cast("timestamp")) \
+           .withColumn("_source_file", lit(input_path))
 
     # Create temp view for MERGE
     df.createOrReplaceTempView("ga4_staging")

@@ -523,7 +523,11 @@ run_batch_pipeline() {
     echo ""
     log_step "Running GA4 batch ingest..."
     log_info "Ingesting GA4 Parquet exports to raw layer"
-    $SPARK_SUBMIT /opt/spark/jobs/ga4_batch_ingest.py --mode full 2>&1 | tail -3 || {
+    # --input is required; --mode accepts append|overwrite only. MERGE INTO on
+    # _raw_id keeps re-runs idempotent, so append is safe on a reset.
+    $SPARK_SUBMIT /opt/spark/jobs/ga4_batch_ingest.py \
+        --input "${GA4_EXPORT_PATH:-/opt/spark/data/ga4/events.parquet}" \
+        --mode append 2>&1 | tail -3 || {
         log_warning "GA4 batch ingest had issues"
     }
     log_success "GA4 batch ingest complete"

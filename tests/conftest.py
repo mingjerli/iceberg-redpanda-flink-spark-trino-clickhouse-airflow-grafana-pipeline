@@ -15,14 +15,29 @@ from datetime import datetime, timedelta
 from pyspark.sql import SparkSession
 import random
 
+from tests.pipeline_tables import (
+    JOB_MANAGED_TABLES,
+    RAW_TABLE_DDL,
+    SEMANTIC_TABLE_DDL,
+    STAGING_TABLE_DDL,
+    create_tables,
+    drop_qualified_tables,
+    drop_tables,
+)
+
 
 @pytest.fixture(scope="session")
 def spark():
     """
     Local SparkSession for unit testing.
 
-    Uses local[*] master with in-memory warehouse.
-    No Iceberg catalog required for unit tests.
+    Uses local[*] master with a temp-dir Iceberg warehouse.
+
+    The catalog is registered as `iceberg` (not `local`) because both the
+    production jobs and the tests address tables as `iceberg.staging.*`. It is
+    backed by a hadoop-type catalog so the suite needs no REST catalog, MinIO,
+    or Postgres running; the `type` override also shadows any REST catalog
+    config baked into the container's spark-defaults.conf.
     """
     warehouse_dir = tempfile.mkdtemp(prefix="spark_warehouse_")
 
@@ -31,15 +46,44 @@ def spark():
         .master("local[*]") \
         .config("spark.sql.warehouse.dir", warehouse_dir) \
         .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions") \
-        .config("spark.sql.catalog.local", "org.apache.iceberg.spark.SparkCatalog") \
-        .config("spark.sql.catalog.local.type", "hadoop") \
-        .config("spark.sql.catalog.local.warehouse", warehouse_dir) \
+        .config("spark.sql.catalog.iceberg", "org.apache.iceberg.spark.SparkCatalog") \
+        .config("spark.sql.catalog.iceberg.type", "hadoop") \
+        .config("spark.sql.catalog.iceberg.warehouse", warehouse_dir) \
+        .config("spark.sql.defaultCatalog", "iceberg") \
         .getOrCreate()
+
+    # Namespaces the pipeline layers write into. Created up front so individual
+    # tests do not each repeat the namespace bootstrap.
+    for namespace in ("raw", "staging", "semantic", "core", "analytics", "marts"):
+        spark.sql(f"CREATE NAMESPACE IF NOT EXISTS iceberg.{namespace}")
 
     yield spark
 
     spark.stop()
     shutil.rmtree(warehouse_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def pipeline_tables(spark):
+    """
+    Empty raw / staging / semantic tables for one test, torn down afterwards.
+
+    The production entity-resolution functions union across all five sources, so
+    every source table must exist even when a test only populates one of them.
+    Tables the jobs create themselves are dropped rather than created, so each
+    test sees the job's own DDL instead of a stale one.
+    """
+    create_tables(spark, "raw", RAW_TABLE_DDL)
+    create_tables(spark, "staging", STAGING_TABLE_DDL)
+    create_tables(spark, "semantic", SEMANTIC_TABLE_DDL)
+    drop_qualified_tables(spark, JOB_MANAGED_TABLES)
+
+    yield
+
+    drop_qualified_tables(spark, JOB_MANAGED_TABLES)
+    drop_tables(spark, "semantic", SEMANTIC_TABLE_DDL)
+    drop_tables(spark, "staging", STAGING_TABLE_DDL)
+    drop_tables(spark, "raw", RAW_TABLE_DDL)
 
 
 @pytest.fixture
