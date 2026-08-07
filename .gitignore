@@ -1,6 +1,7 @@
 # Generated data
 datagen/output/**/*.json
 datagen/output/**/*.jsonl
+datagen/output/**/*.parquet
 !datagen/output/.gitkeep
 
 # Python
