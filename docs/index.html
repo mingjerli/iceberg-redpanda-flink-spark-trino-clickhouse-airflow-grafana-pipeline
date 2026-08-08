@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lakehouse Control Panel</title>
+<!--
+  Static launcher for the local stack. No build step, no dependencies:
+  open it directly (`open docs/index.html`) or serve the repo statically.
+  Ports are the defaults from infrastructure/.env.example.
+-->
+<style>
+  /* ---------- tokens: complete light palette on bare :root ---------- */
+  :root {
+    --ground:      #EEF2F5;
+    --surface:     #FFFFFF;
+    --surface-2:   #F6F9FA;
+    --ink:         #0F1820;
+    --ink-soft:    #56646F;
+    --ink-faint:   #8A97A1;
+    --rule:        #D3DDE3;
+    --rule-soft:   #E4EBEF;
+    --accent:      #0E7C8A;
+    --accent-wash: #DCEEF1;
+    --ok:          #2E7D5B;
+    --shadow:      0 1px 2px rgba(15,24,32,.06), 0 8px 24px -12px rgba(15,24,32,.18);
+
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+    --step--1: clamp(.72rem, .70rem + .1vw, .78rem);
+    --step-0:  clamp(.92rem, .89rem + .14vw, 1rem);
+    --step-1:  clamp(1.08rem, 1.02rem + .3vw, 1.25rem);
+    --step-2:  clamp(1.35rem, 1.2rem + .7vw, 1.85rem);
+    --step-3:  clamp(1.9rem, 1.5rem + 1.9vw, 3.1rem);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0B1218;
+      --surface:     #121C24;
+      --surface-2:   #16222B;
+      --ink:         #E7EEF2;
+      --ink-soft:    #93A4B0;
+      --ink-faint:   #6B7C88;
+      --rule:        #24333E;
+      --rule-soft:   #1B2831;
+      --accent:      #4FC3D4;
+      --accent-wash: #10323A;
+      --ok:          #5BBF8E;
+      --shadow:      0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:      #0B1218;
+    --surface:     #121C24;
+    --surface-2:   #16222B;
+    --ink:         #E7EEF2;
+    --ink-soft:    #93A4B0;
+    --ink-faint:   #6B7C88;
+    --rule:        #24333E;
+    --rule-soft:   #1B2831;
+    --accent:      #4FC3D4;
+    --accent-wash: #10323A;
+    --ok:          #5BBF8E;
+    --shadow:      0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.7);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: var(--step-0);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1120px; margin-inline: auto; padding: clamp(1.5rem, 4vw, 3.5rem) clamp(1rem, 4vw, 2rem) 5rem; }
+
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: var(--step--1);
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0;
+  }
+
+  /* ---------- masthead ---------- */
+  .masthead { display: flex; flex-direction: column; gap: .9rem; padding-bottom: 1.75rem; border-bottom: 1px solid var(--rule); }
+  .masthead h1 {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: var(--step-3);
+    font-weight: 600;
+    letter-spacing: -.02em;
+    line-height: 1.02;
+    text-wrap: balance;
+  }
+  .masthead h1 .dim { color: var(--ink-faint); font-weight: 400; }
+  .lede { margin: 0; max-width: 62ch; color: var(--ink-soft); font-size: var(--step-1); text-wrap: pretty; }
+
+  .facts { display: flex; flex-wrap: wrap; gap: .45rem 1.5rem; margin-top: .35rem; }
+  .fact { display: flex; align-items: baseline; gap: .5rem; font-family: var(--mono); font-size: var(--step--1); }
+  .fact b { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .fact span { color: var(--ink-faint); }
+
+  .snapshot {
+    margin: 1.25rem 0 0; padding: .7rem .9rem;
+    background: var(--surface-2);
+    border: 1px solid var(--rule-soft);
+    border-left: 3px solid var(--ok);
+    border-radius: 4px;
+    font-size: var(--step--1);
+    color: var(--ink-soft);
+  }
+  .snapshot b { color: var(--ink); font-family: var(--mono); font-weight: 600; }
+
+  /* ---------- flow ---------- */
+  .flow { margin: 2.75rem 0 0; }
+  .flow-scroll { overflow-x: auto; padding-bottom: .5rem; margin-top: .75rem; }
+  .flow svg { display: block; min-width: 700px; width: 100%; height: auto; }
+
+  /* ---------- strata ---------- */
+  .strata { margin-top: 3rem; display: flex; flex-direction: column; gap: 2.5rem; }
+
+  .stage { display: grid; grid-template-columns: 4rem 1fr; gap: 0 1.25rem; }
+  .stage-rail { position: relative; }
+  .stage-depth {
+    font-family: var(--mono); font-size: var(--step-2); font-weight: 600;
+    color: var(--rule); line-height: 1; font-variant-numeric: tabular-nums;
+  }
+  .stage-rail::after {
+    content: ""; position: absolute; top: 2.4rem; bottom: -2.5rem; left: .5rem;
+    width: 1px; background: var(--rule-soft);
+  }
+  .stage:last-of-type .stage-rail::after { display: none; }
+
+  .stage-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem .8rem; margin-bottom: 1rem; }
+  .stage-head h2 { margin: 0; font-size: var(--step-1); font-weight: 650; letter-spacing: -.01em; }
+  .stage-head p { margin: 0; color: var(--ink-soft); font-size: var(--step--1); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: .85rem; }
+
+  .card {
+    display: flex; flex-direction: column; gap: .5rem;
+    padding: .95rem 1rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    box-shadow: var(--shadow);
+    text-decoration: none;
+    transition: border-color .14s ease, transform .14s ease;
+  }
+  .card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  @media (prefers-reduced-motion: reduce) {
+    .card { transition: none; }
+    .card:hover { transform: none; }
+  }
+
+  .card-top { display: flex; align-items: baseline; justify-content: space-between; gap: .6rem; }
+  .card-name { font-weight: 650; font-size: var(--step-0); letter-spacing: -.005em; }
+  .card-port {
+    font-family: var(--mono); font-size: var(--step--1); font-variant-numeric: tabular-nums;
+    color: var(--accent); white-space: nowrap;
+  }
+  .card-role { margin: 0; color: var(--ink-soft); font-size: var(--step--1); line-height: 1.5; }
+  .card-role code { font-family: var(--mono); font-size: .95em; }
+  .card-meta { margin-top: auto; padding-top: .35rem; font-family: var(--mono); font-size: var(--step--1); color: var(--ink-faint); }
+
+  .chip {
+    display: inline-block; padding: .05rem .4rem; border-radius: 3px;
+    background: var(--accent-wash); color: var(--accent);
+    font-family: var(--mono); font-size: .95em;
+  }
+
+  /* ---------- dashboards ---------- */
+  .dash-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: .5rem; margin-top: .8rem; }
+  .dash {
+    display: flex; align-items: baseline; gap: .5rem;
+    padding: .5rem .7rem;
+    border: 1px dashed var(--rule); border-radius: 5px;
+    text-decoration: none; color: var(--ink);
+    font-size: var(--step--1);
+    transition: border-color .14s ease, background .14s ease;
+  }
+  .dash:hover { border-style: solid; border-color: var(--accent); background: var(--surface); }
+  .dash code { font-family: var(--mono); color: var(--accent); font-size: .92em; }
+
+  /* ---------- table ---------- */
+  .layers { margin-top: 3rem; }
+  .table-scroll { overflow-x: auto; margin-top: .8rem; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: var(--step--1); }
+  th, td { text-align: left; padding: .6rem .85rem; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  thead th { font-family: var(--mono); text-transform: uppercase; letter-spacing: .09em; color: var(--ink-faint); font-weight: 500; background: var(--surface-2); }
+  tbody tr:last-child td { border-bottom: none; }
+  td code { font-family: var(--mono); color: var(--ink-soft); }
+  .layer-name { font-family: var(--mono); font-weight: 600; color: var(--accent); white-space: nowrap; }
+
+  /* ---------- footer ---------- */
+  footer { margin-top: 3.5rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); display: flex; flex-wrap: wrap; gap: .6rem 1.5rem; align-items: baseline; }
+  footer a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  footer p { margin: 0; color: var(--ink-faint); font-size: var(--step--1); }
+  footer code { font-family: var(--mono); }
+
+  @media (max-width: 560px) {
+    .stage { grid-template-columns: 1fr; gap: .4rem; }
+    .stage-rail::after { display: none; }
+    .stage-depth { font-size: var(--step-1); }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Local environment &middot; 20 containers</p>
+    <h1>Lakehouse<span class="dim">/</span>Control&nbsp;Panel</h1>
+    <p class="lede">
+      Five sources land in one Apache Iceberg lakehouse &mdash; four by webhook through Flink,
+      GA4 by batch Parquet. Every component below is a service running on this machine.
+    </p>
+    <div class="facts">
+      <span class="fact"><b>5</b><span>sources</span></span>
+      <span class="fact"><b>6</b><span>layers</span></span>
+      <span class="fact"><b>20</b><span>containers</span></span>
+      <span class="fact"><b>13</b><span>service UIs</span></span>
+    </div>
+  </header>
+
+  <p class="snapshot">
+    <b>Links point at localhost.</b> They resolve only while the stack is up &mdash;
+    start it with <b>docker-compose up -d</b> in <b>infrastructure/</b>, or
+    <b>./scripts/reset_and_run.sh</b> for a full reset and pipeline run. Ports come
+    from <code>infrastructure/.env</code>; if you have overridden any, the links
+    below follow the defaults.
+  </p>
+
+  <!-- ============ FLOW ============ -->
+  <section class="flow" aria-labelledby="flow-h">
+    <p class="eyebrow" id="flow-h">How data moves</p>
+    <div class="flow-scroll">
+      <svg viewBox="0 0 900 185" role="img" aria-label="Two ingress paths converge on the raw Iceberg layer. Four webhook sources arrive through FastAPI, Redpanda and Flink; Google Analytics 4 arrives as a Parquet export through a Spark batch job. From raw, data flows through staging, semantic, core, analytics and marts.">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <g style="color: var(--ink-faint)">
+          <text x="0" y="42" font-family="ui-monospace, monospace" font-size="12" fill="var(--ink-soft)">Shopify &middot; Stripe &middot; HubSpot &middot; Mailchimp</text>
+          <text x="0" y="59" font-family="ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)">webhooks &rarr; FastAPI &rarr; Redpanda &rarr; Flink</text>
+          <line x1="262" y1="40" x2="330" y2="40" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+
+          <text x="0" y="112" font-family="ui-monospace, monospace" font-size="12" fill="var(--ink-soft)">Google Analytics 4</text>
+          <text x="0" y="129" font-family="ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)">Parquet export &rarr; Spark batch ingest</text>
+          <line x1="262" y1="110" x2="330" y2="110" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ar)"/>
+        </g>
+
+        <rect x="340" y="22" width="92" height="106" rx="5" fill="var(--accent-wash)" stroke="var(--accent)"/>
+        <text x="386" y="70" text-anchor="middle" font-family="ui-monospace, monospace" font-size="13" font-weight="600" fill="var(--accent)">raw</text>
+        <text x="386" y="88" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10" fill="var(--accent)">Iceberg</text>
+
+        <g style="color: var(--ink-faint)">
+          <line x1="436" y1="75" x2="484" y2="75" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+        </g>
+
+        <g font-family="ui-monospace, monospace" font-size="11" text-anchor="middle">
+          <rect x="492" y="53" width="74" height="44" rx="4" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="529" y="80" fill="var(--ink-soft)">staging</text>
+          <rect x="576" y="53" width="80" height="44" rx="4" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="616" y="80" fill="var(--ink-soft)">semantic</text>
+          <rect x="666" y="53" width="58" height="44" rx="4" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="695" y="80" fill="var(--ink-soft)">core</text>
+          <rect x="734" y="53" width="76" height="44" rx="4" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="772" y="80" fill="var(--ink-soft)">analytics</text>
+          <rect x="820" y="53" width="60" height="44" rx="4" fill="var(--surface)" stroke="var(--rule)"/>
+          <text x="850" y="80" fill="var(--ink-soft)">marts</text>
+        </g>
+        <g style="color: var(--rule)" stroke="currentColor" stroke-width="1.5">
+          <line x1="568" y1="75" x2="574" y2="75"/>
+          <line x1="658" y1="75" x2="664" y2="75"/>
+          <line x1="726" y1="75" x2="732" y2="75"/>
+          <line x1="812" y1="75" x2="818" y2="75"/>
+        </g>
+        <text x="850" y="117" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10" fill="var(--ink-faint)">&rarr; Grafana</text>
+        <text x="616" y="163" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)">Airflow orchestrates every Spark step on a 4-hour schedule</text>
+      </svg>
+    </div>
+  </section>
+
+  <!-- ============ STAGES ============ -->
+  <div class="strata">
+
+    <section class="stage">
+      <div class="stage-rail"><div class="stage-depth">01</div></div>
+      <div>
+        <div class="stage-head">
+          <h2>Ingest</h2>
+          <p>Where records enter the platform</p>
+        </div>
+        <div class="cards">
+          <a class="card" href="http://localhost:8090/docs" target="_blank" rel="noopener">
+            <div class="card-top"><span class="card-name">Ingestion API</span><span class="card-port">:8090</span></div>
+            <p class="card-role">FastAPI webhook receiver with HMAC signature validation. Opens the interactive OpenAPI docs.</p>
+            <div class="card-meta">4 webhook sources</div>
+          </a>
+          <a class="card" href="http://localhost:8080" target="_blank" rel="noopener">
+            <div class="card-top"><span class="card-name">Redpanda Console</span><span class="card-port">:8080</span></div>
+            <p class="card-role">Browse Kafka topics and read individual messages as they stream in.</p>
+            <div class="card-meta">broker on :19092</div>
+          </a>
+          <a class="card" href="http://localhost:18081/subjects" target="_blank" rel="noopener">
+            <div class="card-top"><span class="card-name">Schema Registry</span><span class="card-port">:18081</span></div>
+            <p class="card-role">Registered message schemas, served as JSON.</p>
+            <div class="card-meta"><span class="chip">remapped</span> 8081 was taken</div>
+          </a>
+          <a class="card" href="http://localhost:19644/v1/status/ready" target="_blank" rel="noopener">
+            <div class="card-top"><span class="card-name">Redpanda Admin</span><span class="card-port">:19644</span></div>
+            <p class="card-role">Cluster readiness and admin endpoints &mdash; also the Prometheus scrape target.</p>
+            <div class="card-meta"><span class="chip">remapped</span> from 9644</div>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="stage">
+      <div class="stage-rail"><div class="stage-depth">02</div></div>
+      <div>
+        <div class="stage-head">
+          <h2>Store</h2>
+          <p>Objects on disk, and the catalog that makes them tables</p>
+        </div>
+        <div class="cards">
+          <a class="card" href="http://localhost:9001" target="_blank" rel="noopener">
+            <div class="card-top"><span class="card-name">MinIO Console</span><span class="card-port">:9001</span></div>
+            <p class="card-role">S3-compatible object store. Every Iceberg data and metadata file lives in the <code>warehouse</code> bucket.</p>
+            <div class="card-meta">admin / admin123</div>
+          </a>
+          <a class="card" href="http://localhost:8181/v1/namespaces" target="_blank" rel="noopener">
+            <div class="card-top"><span class="card-name">Iceberg REST Catalog</span><span class="card-port">:8181</span></div>
+            <p class="card-role">Table metadata, backed by PostgreSQL so Spark and Flink can write concurrently. Lists namespaces.</p>
+            <div class="card-meta">Parquet + zstd &middot; format v2</div>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="stage">
+      <div class="stage-rail"><div class="stage-depth">03</div></div>
+      <div>
+        <div class="stage-head">
+          <h2>Process</h2>
+          <p>The engines that move data between layers</p>
+        </div>
+        <div class="cards">
+          <a class="card" href="http://localhost:8083" target="_blank" rel="noopener">
+            <div class="card-top"><span class="card-name">Flink Dashboard</span><span class="card-port">:8083</span></div>
+            <p class="card-role">Streaming SQL jobs writing Kafka topics into the raw layer, with exactly-once checkpointing.</p>
+            <div class="card-meta">jobs/flink/*_full.sql</div>
+          </a>
+          <a class="card" href="http://localhost:8084" target="_blank" rel="noopener">
+            <div class="card-top"><span class="card-name">Spark Master</span><span class="card-port">:8084</span></div>
+            <p class="card-role">Batch jobs for staging, entity resolution, analytics and marts &mdash; plus the GA4 Parquet ingest.</p>
+            <div class="card-meta">jobs/spark/*.py</div>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="stage">
+      <div class="stage-rail"><div class="stage-depth">04</div></div>
+      <div>
+        <div class="stage-head">
+          <h2>Query</h2>
+          <p>Two engines reading the same tables</p>
+        </div>
+        <div class="cards">
+          <a class="card" href="http://localhost:8085" target="_blank" rel="noopener">
+            <div class="card-top"><span class="card-name">Trino</span><span class="card-port">:8085</span></div>
+            <p class="card-role">Interactive SQL across every layer &mdash; the one to reach for when exploring ad hoc.</p>
+            <div class="card-meta">catalog: iceberg</div>
+          </a>
+          <a class="card" href="http://localhost:8123/play" target="_blank" rel="noopener">
+            <div class="card-top"><span class="card-name">ClickHouse</span><span class="card-port">:8123</span></div>
+            <p class="card-role">Serves the Grafana dashboards through views over the Iceberg tables. Opens the query playground.</p>
+            <div class="card-meta">native on :19000</div>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="stage">
+      <div class="stage-rail"><div class="stage-depth">05</div></div>
+      <div>
+        <div class="stage-head">
+          <h2>Orchestrate</h2>
+          <p>What runs the batch chain, and when</p>
+        </div>
+        <div class="cards">
+          <a class="card" href="http://localhost:8086/dags/iceberg_pipeline/graph" target="_blank" rel="noopener">
+            <div class="card-top"><span class="card-name">Pipeline graph</span><span class="card-port">:8086</span></div>
+            <p class="card-role">The <code>iceberg_pipeline</code> DAG: staging &rarr; semantic &rarr; core &rarr; analytics &rarr; marts, every 4 hours.</p>
+            <div class="card-meta">admin / admin123</div>
+          </a>
+          <a class="card" href="http://localhost:8086" target="_blank" rel="noopener">
+            <div class="card-top"><span class="card-name">Airflow home</span><span class="card-port">:8086</span></div>
+            <p class="card-role">Run history, task logs and manual triggers for every DAG.</p>
+            <div class="card-meta">admin / admin123</div>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="stage">
+      <div class="stage-rail"><div class="stage-depth">06</div></div>
+      <div>
+        <div class="stage-head">
+          <h2>Observe</h2>
+          <p>Dashboards over the marts layer, metrics over the platform itself</p>
+        </div>
+        <div class="cards">
+          <a class="card" href="http://localhost:3000" target="_blank" rel="noopener">
+            <div class="card-top"><span class="card-name">Grafana</span><span class="card-port">:3000</span></div>
+            <p class="card-role">Six provisioned dashboards reading ClickHouse views. Deep links below.</p>
+            <div class="card-meta">admin / admin123</div>
+          </a>
+          <a class="card" href="http://localhost:9090/targets" target="_blank" rel="noopener">
+            <div class="card-top"><span class="card-name">Prometheus</span><span class="card-port">:9090</span></div>
+            <p class="card-role">Scrapes Redpanda, Flink, Spark and Airflow. Opens the target health page.</p>
+            <div class="card-meta">monitoring/alerts/</div>
+          </a>
+        </div>
+
+        <p class="eyebrow" style="margin-top:1.6rem">Grafana dashboards</p>
+        <div class="dash-list">
+          <a class="dash" href="http://localhost:3000/d/batch-business" target="_blank" rel="noopener">Batch Business <code>+GA4</code></a>
+          <a class="dash" href="http://localhost:3000/d/streaming-business" target="_blank" rel="noopener">Streaming Business</a>
+          <a class="dash" href="http://localhost:3000/d/iceberg-pipeline-dashboard" target="_blank" rel="noopener">Iceberg Pipeline</a>
+          <a class="dash" href="http://localhost:3000/d/ingestion-api" target="_blank" rel="noopener">Ingestion API</a>
+          <a class="dash" href="http://localhost:3000/d/batch-infra" target="_blank" rel="noopener">Batch Infrastructure</a>
+          <a class="dash" href="http://localhost:3000/d/streaming-infra" target="_blank" rel="noopener">Streaming Infrastructure</a>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ============ LAYERS ============ -->
+  <section class="layers" aria-labelledby="layers-h">
+    <p class="eyebrow" id="layers-h">Medallion layers</p>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th scope="col">Layer</th><th scope="col">What it holds</th><th scope="col">Written by</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="layer-name">raw</td>
+            <td>Append-only source events, exactly as received</td>
+            <td><code>Flink SQL</code> &middot; <code>ga4_batch_ingest.py</code></td>
+          </tr>
+          <tr>
+            <td class="layer-name">staging</td>
+            <td>Cleaned, typed, deduplicated; GA4 events also rolled up into sessions</td>
+            <td><code>staging_batch.py</code></td>
+          </tr>
+          <tr>
+            <td class="layer-name">semantic</td>
+            <td>Entity resolution &mdash; one unified customer across all five sources</td>
+            <td><code>entity_backfill.py</code></td>
+          </tr>
+          <tr>
+            <td class="layer-name">core</td>
+            <td>Unified business objects built on the resolved entities</td>
+            <td><code>core_views.py</code></td>
+          </tr>
+          <tr>
+            <td class="layer-name">analytics</td>
+            <td>Aggregated metrics: customers, orders, payments, campaigns, GA4 engagement</td>
+            <td><code>analytics_incremental.py</code></td>
+          </tr>
+          <tr>
+            <td class="layer-name">marts</td>
+            <td>Dashboard-ready tables &mdash; customer 360, sales, campaigns, GA4 engagement</td>
+            <td><code>marts_incremental.py</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <p><a href="../README.md">README</a></p>
+    <p><a href="../ARCHITECTURE.md">Architecture</a></p>
+    <p><a href="./RUNBOOK.md">Runbook</a></p>
+    <p><a href="https://github.com/mingjerli/iceberg-redpanda-flink-spark-trino-clickhouse-airflow-grafana-pipeline" target="_blank" rel="noopener">Repository</a></p>
+    <p>Ports default to <code>infrastructure/.env.example</code>.</p>
+  </footer>
+
+</div>
+</body>
+</html>

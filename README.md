@@ -1,6 +1,6 @@
 # Iceberg + Redpanda + Flink + Spark + Trino + ClickHouse + Airflow + Grafana Pipeline
 
-This is a production-style(but not production-ready) data platform combining real-time streaming and batch processing with Apache Iceberg as the unified storage layer. Demonstrates entity resolution across Shopify, Stripe, and HubSpot data sources.
+This is a production-style(but not production-ready) data platform combining real-time streaming and batch processing with Apache Iceberg as the unified storage layer. Demonstrates entity resolution across five sources: Shopify, Stripe, HubSpot and Mailchimp (webhooks), plus GA4 (batch Parquet export).
 
 **DISCLOSURE:Majority of the content are written with Claude(with human guided) ... as you can expected.**
 
@@ -41,6 +41,7 @@ As I tyied to make the pipeline more real, I fell into the rabbit hole of settin
 | Document | Purpose |
 |----------|---------|
 | [README.md](./README.md) | Quick start and overview (this file) |
+| [docs/index.html](./docs/index.html) | Control panel — every component UI, grouped by pipeline stage. Open it once the stack is up: `open docs/index.html` |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | System design, infrastructure rationale, data layer philosophy |
 | [infrastructure/README.md](./infrastructure/README.md) | Service-by-service guide with tool selection rationale |
 | [docs/RUNBOOK.md](./docs/RUNBOOK.md) | Operational procedures and troubleshooting |
@@ -133,7 +134,9 @@ docker exec iceberg-flink-jobmanager /opt/flink/bin/sql-client.sh embedded -e "
 
 ```bash
 # Submit all raw layer ingestion jobs
-for job in shopify_orders shopify_customers stripe_charges hubspot_contacts; do
+# GA4 is absent here on purpose: it has no Flink job, arriving as batch Parquet
+for job in shopify_orders shopify_customers stripe_charges stripe_customers \
+           hubspot_contacts mailchimp_campaigns mailchimp_events mailchimp_subscribers; do
     docker exec iceberg-flink-jobmanager /opt/flink/bin/sql-client.sh embedded \
         -f "/opt/flink/jobs/${job}_full.sql" &
     sleep 2
@@ -146,7 +149,7 @@ done
 # Install dependencies
 python3 -m venv .venv
 source .venv/bin/activate
-pip install click httpx faker
+pip install -r datagen/requirements.txt -r scripts/requirements.txt
 
 # Post mock data to webhook endpoints
 python scripts/post_mock_data.py \
@@ -537,6 +540,10 @@ iceberg-incremental-demo/
 │   ├── 03_core/
 │   ├── 04_analytics/
 │   └── 05_marts/
+├── docs/
+│   ├── index.html               # Control panel (open in a browser)
+│   ├── ARCHITECTURE.md          # see repo root
+│   └── RUNBOOK.md               # Operational procedures
 ├── scripts/                     # Utility scripts
 │   ├── reset_and_run.sh         # Main setup script (--help for options)
 │   ├── run_tests.sh             # Run the test suite in the Spark image
