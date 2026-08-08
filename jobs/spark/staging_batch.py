@@ -1309,10 +1309,11 @@ def compute_ga4_sessions(spark, mode="incremental"):
         .withColumn("_staged_at", current_timestamp()) \
         .drop("t_src", "t_med", "t_camp", "d_cat", "d_os", "g_cty", "g_reg", "land", "exit", "sess_num")
 
-    if mode == "full":
-        sessions.writeTo("iceberg.staging.stg_ga4_sessions").using("iceberg").createOrReplace()
-    else:
-        sessions.writeTo("iceberg.staging.stg_ga4_sessions").using("iceberg").append()
+    # Full recomputation regardless of mode: the read above is unfiltered,
+    # so this must replace rather than append. Appending a complete
+    # recomputation on top of the previous one duplicated the whole table on
+    # every scheduled run -- sessions went 308 -> 616 -> 924.
+    sessions.writeTo("iceberg.staging.stg_ga4_sessions").using("iceberg").createOrReplace()
 
     record_count = sessions.count()
     logger.info(f"✅ Computed {record_count} sessions")

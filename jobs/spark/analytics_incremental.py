@@ -914,10 +914,11 @@ def compute_ga4_engagement_metrics(spark: SparkSession, mode: str = "incremental
     )
 
     # Write
-    if mode == "full":
-        metrics.writeTo("iceberg.analytics.ga4_engagement_metrics").using("iceberg").createOrReplace()
-    else:
-        metrics.writeTo("iceberg.analytics.ga4_engagement_metrics").using("iceberg").append()
+    # Full recomputation regardless of mode: the read above is unfiltered,
+    # so this must replace rather than append. Appending a complete
+    # recomputation on top of the previous one duplicated the whole table on
+    # every scheduled run -- and two rows per metric_date then broke the marts MERGE.
+    metrics.writeTo("iceberg.analytics.ga4_engagement_metrics").using("iceberg").createOrReplace()
 
     record_count = metrics.count()
     logger.info(f"✅ Computed {record_count} engagement metric rows")
@@ -997,10 +998,11 @@ def compute_ga4_page_performance(spark: SparkSession, mode: str = "incremental")
     )
 
     # Write
-    if mode == "full":
-        page_metrics.writeTo("iceberg.analytics.ga4_page_performance").using("iceberg").createOrReplace()
-    else:
-        page_metrics.writeTo("iceberg.analytics.ga4_page_performance").using("iceberg").append()
+    # Full recomputation regardless of mode: the read above is unfiltered,
+    # so this must replace rather than append. Appending a complete
+    # recomputation on top of the previous one duplicated the whole table on
+    # every scheduled run -- one full copy of page stats per run.
+    page_metrics.writeTo("iceberg.analytics.ga4_page_performance").using("iceberg").createOrReplace()
 
     record_count = page_metrics.count()
     logger.info(f"✅ Computed {record_count} page performance rows")
@@ -1105,10 +1107,11 @@ def compute_ga4_funnel_analysis(spark: SparkSession, mode: str = "incremental"):
         final_funnel = final_funnel.union(df)
 
     # Write
-    if mode == "full":
-        final_funnel.writeTo("iceberg.analytics.ga4_funnel_analysis").using("iceberg").createOrReplace()
-    else:
-        final_funnel.writeTo("iceberg.analytics.ga4_funnel_analysis").using("iceberg").append()
+    # Full recomputation regardless of mode: the read above is unfiltered,
+    # so this must replace rather than append. Appending a complete
+    # recomputation on top of the previous one duplicated the whole table on
+    # every scheduled run -- one full copy of every funnel step per run.
+    final_funnel.writeTo("iceberg.analytics.ga4_funnel_analysis").using("iceberg").createOrReplace()
 
     record_count = final_funnel.count()
     logger.info(f"✅ Computed {record_count} funnel analysis rows")
@@ -1179,10 +1182,11 @@ def compute_ga4_engagement_by_channel(spark: SparkSession, mode: str = "incremen
     )
 
     # Write
-    if mode == "full":
-        channel_metrics.writeTo("iceberg.analytics.ga4_engagement_by_channel").using("iceberg").createOrReplace()
-    else:
-        channel_metrics.writeTo("iceberg.analytics.ga4_engagement_by_channel").using("iceberg").append()
+    # Full recomputation regardless of mode: the read above is unfiltered,
+    # so this must replace rather than append. Appending a complete
+    # recomputation on top of the previous one duplicated the whole table on
+    # every scheduled run -- one full copy of every channel row per run.
+    channel_metrics.writeTo("iceberg.analytics.ga4_engagement_by_channel").using("iceberg").createOrReplace()
 
     record_count = channel_metrics.count()
     logger.info(f"✅ Computed {record_count} channel metric rows")

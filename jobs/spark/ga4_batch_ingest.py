@@ -88,13 +88,22 @@ def ingest_ga4_export(spark, input_path, mode="append"):
     # Create temp view for MERGE
     df.createOrReplaceTempView("ga4_staging")
 
-    # MERGE INTO for idempotent upsert
+    # Insert-only on purpose. _raw_id is a hash of (client_id, event_timestamp,
+    # event_name), so a match is the same immutable analytics event and there is
+    # nothing to update.
+    #
+    # A `WHEN MATCHED THEN UPDATE SET *` here is actively harmful: it rewrites
+    # _loaded_at on every re-ingest, which pushes every existing row past the
+    # staging watermark (MAX(_staged_at)). The next incremental staging run then
+    # treats the whole file as new and appends a second copy, doubling
+    # stg_ga4_events and stg_ga4_sessions. Analytics then holds two rows per
+    # metric_date, and the marts MERGE on that key dies with
+    # MERGE_CARDINALITY_VIOLATION.
     logger.info("Executing MERGE INTO for idempotent ingestion")
     merge_result = spark.sql("""
         MERGE INTO iceberg.raw.ga4_events AS target
         USING ga4_staging AS source
         ON target._raw_id = source._raw_id
-        WHEN MATCHED THEN UPDATE SET *
         WHEN NOT MATCHED THEN INSERT *
     """)
 

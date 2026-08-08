@@ -267,3 +267,27 @@ def test_e2e_ga4_idempotency(spark, pipeline_tables, ga4_export_dir):
         .groupBy("client_id", "event_timestamp", "event_name") \
         .count().filter(col("count") > 1).count()
     assert duplicates == 0, "Should have no duplicates in staging"
+
+    # Everything above only proves the *raw* layer is idempotent -- which it was
+    # even while a second scheduled DAG run was doubling every table beneath it.
+    # Re-ingesting used to rewrite _loaded_at, pushing every row past the
+    # staging watermark, and the aggregations appended a full recomputation each
+    # time. So drive the downstream steps a second time and assert nothing moved.
+    from jobs.spark.staging_batch import compute_ga4_sessions
+
+    compute_ga4_sessions(spark, mode="full")
+    sessions_first = spark.table(STG_GA4_SESSIONS).count()
+    assert sessions_first > 0, "Expected sessions from the first pass"
+
+    ingest_ga4_export(spark, path)          # a retry re-ingests the same file
+    stage_ga4_events(spark, mode="incremental")
+    compute_ga4_sessions(spark, mode="incremental")
+
+    assert spark.table(RAW_GA4_EVENTS).count() == first_raw_count, \
+        "Second pass changed the raw row count"
+    assert spark.table(STG_GA4_EVENTS).count() == first_raw_count, \
+        f"Second pass duplicated staged events " \
+        f"({first_raw_count} -> {spark.table(STG_GA4_EVENTS).count()})"
+    assert spark.table(STG_GA4_SESSIONS).count() == sessions_first, \
+        f"Second pass duplicated sessions " \
+        f"({sessions_first} -> {spark.table(STG_GA4_SESSIONS).count()})"
