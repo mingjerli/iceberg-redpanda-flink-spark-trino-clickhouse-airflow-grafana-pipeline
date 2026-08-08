@@ -247,7 +247,31 @@ def get_all_staging_customers(
         WHERE 1=1 {date_filter}
     """)
 
-    all_customers = shopify.union(hubspot).union(stripe).union(mailchimp).filter(
+    # GA4 sessions (only logged-in users with user_id)
+    # Note: user_id in GA4 is set to email for entity resolution demo
+    ga4 = spark.sql(f"""
+        SELECT
+            'ga4_sessions' AS source,
+            CAST(client_id AS STRING) AS source_id,
+            user_id AS email,
+            CAST(NULL AS STRING) AS first_name,
+            CAST(NULL AS STRING) AS last_name,
+            CAST(NULL AS STRING) AS full_name,
+            CAST(NULL AS STRING) AS phone,
+            CAST(NULL AS STRING) AS address,
+            CAST(NULL AS STRING) AS city,
+            CAST(NULL AS STRING) AS state,
+            CAST(NULL AS STRING) AS zip,
+            geo_country AS country,
+            session_start AS created_at,
+            _staged_at
+        FROM iceberg.staging.stg_ga4_sessions
+        WHERE user_id IS NOT NULL
+          AND user_id != ''
+          {date_filter}
+    """)
+
+    all_customers = shopify.union(hubspot).union(stripe).union(mailchimp).union(ga4).filter(
         # Filter out records without a valid source_id
         col("source_id").isNotNull()
     )
@@ -456,7 +480,7 @@ def rebuild_blocking_index(spark: SparkSession, dry_run: bool):
             ei.unified_id,
             ei.source,
             ei.source_id,
-            LOWER(TRIM(COALESCE(hc.email, sc.email, stc.email, mc.email_normalized))) AS normalized_email,
+            LOWER(TRIM(COALESCE(hc.email, sc.email, stc.email, mc.email_normalized, ga4_sub.user_id))) AS normalized_email,
             REGEXP_REPLACE(COALESCE(hc.phone, hc.mobile_phone, sc.phone, stc.phone, mc.phone_normalized), '[^0-9+]', '') AS normalized_phone,
             COALESCE(hc.last_name, sc.last_name, stc.last_name, mc.last_name) AS last_name,
             COALESCE(hc.zip, sc.zip, stc.postal_code) AS zip
@@ -473,6 +497,19 @@ def rebuild_blocking_index(spark: SparkSession, dry_run: bool):
         LEFT JOIN iceberg.staging.stg_mailchimp_subscribers mc
             ON ei.source = 'mailchimp_subscribers'
             AND ei.source_id = mc.subscriber_id
+        LEFT JOIN (
+            SELECT
+                client_id,
+                user_id,
+                geo_country,
+                session_start,
+                ROW_NUMBER() OVER (
+                    PARTITION BY client_id
+                    ORDER BY session_start DESC
+                ) AS rn
+            FROM iceberg.staging.stg_ga4_sessions
+            WHERE user_id IS NOT NULL AND user_id != ''
+        ) ga4_sub ON ei.source = 'ga4_sessions' AND ei.source_id = ga4_sub.client_id AND ga4_sub.rn = 1
         WHERE ei.entity_type = 'customer'
           AND ei.linked_to_unified_id IS NULL
     """)

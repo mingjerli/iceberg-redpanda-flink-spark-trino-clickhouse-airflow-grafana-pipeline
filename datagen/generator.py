@@ -26,6 +26,8 @@ from providers.shopify_provider import ShopifyProvider
 from providers.stripe_provider import StripeProvider
 from providers.hubspot_provider import HubSpotProvider
 from providers.mailchimp_provider import MailchimpProvider
+from providers.ga4_provider import GA4Provider
+import pandas as pd
 
 
 class DataGenerator:
@@ -38,6 +40,7 @@ class DataGenerator:
         self.stripe = StripeProvider(seed=seed)
         self.hubspot = HubSpotProvider(seed=seed)
         self.mailchimp = MailchimpProvider(seed=seed)
+        self.ga4 = GA4Provider(seed=seed)
 
         # Shared customer pool for cross-source entity resolution demo
         self._shared_customers: List[Dict] = []
@@ -242,6 +245,23 @@ class DataGenerator:
             "events": event_list,
         }
 
+    def generate_ga4_data(
+        self,
+        num_users: int = 200,
+        events_per_user: tuple = (3, 20),
+    ) -> Dict[str, List[Dict]]:
+        """Generate GA4 BigQuery Export-style data."""
+        print("\n📊 Generating GA4 events...")
+        event_list = self.ga4.generate_export_batch(
+            num_users=num_users,
+            events_per_user_range=events_per_user,
+            shared_customers=self._shared_customers,
+        )
+
+        return {
+            "events": event_list,
+        }
+
     def generate_all(
         self,
         scale: float = 1.0,
@@ -289,11 +309,18 @@ class DataGenerator:
             events=int(500 * scale),
         )
 
+        print("\n📊 Generating GA4 data...")
+        ga4_data = self.generate_ga4_data(
+            num_users=int(200 * scale),
+            events_per_user=(3, 20),
+        )
+
         return {
             "shopify": shopify_data,
             "stripe": stripe_data,
             "hubspot": hubspot_data,
             "mailchimp": mailchimp_data,
+            "ga4": ga4_data,
         }
 
     def save_to_files(
@@ -316,24 +343,33 @@ class DataGenerator:
             source_dir = output_dir / source
             source_dir.mkdir(parents=True, exist_ok=True)
 
-            for entity, records in entities.items():
-                if format == "jsonl":
-                    file_path = source_dir / f"{entity}.jsonl"
-                    with open(file_path, "wb") as f:
-                        for record in records:
-                            f.write(orjson.dumps(record) + b"\n")
-                else:
-                    file_path = source_dir / f"{entity}.json"
-                    with open(file_path, "wb") as f:
-                        f.write(orjson.dumps(records, option=orjson.OPT_INDENT_2))
+            # GA4 uses Parquet format (BigQuery Export simulation)
+            if source == "ga4":
+                for entity, records in entities.items():
+                    file_path = source_dir / f"{entity}.parquet"
+                    df = pd.DataFrame(records)
+                    df.to_parquet(file_path, index=False, engine='pyarrow')
+                    print(f"  ✅ Saved {len(records)} {entity} to {file_path}")
+            else:
+                # Other sources use JSONL/JSON
+                for entity, records in entities.items():
+                    if format == "jsonl":
+                        file_path = source_dir / f"{entity}.jsonl"
+                        with open(file_path, "wb") as f:
+                            for record in records:
+                                f.write(orjson.dumps(record) + b"\n")
+                    else:
+                        file_path = source_dir / f"{entity}.json"
+                        with open(file_path, "wb") as f:
+                            f.write(orjson.dumps(records, option=orjson.OPT_INDENT_2))
 
-                print(f"  ✅ Saved {len(records)} {entity} to {file_path}")
+                    print(f"  ✅ Saved {len(records)} {entity} to {file_path}")
 
 
 @click.command()
 @click.option(
     "--source",
-    type=click.Choice(["shopify", "stripe", "hubspot", "mailchimp", "all"]),
+    type=click.Choice(["shopify", "stripe", "hubspot", "mailchimp", "ga4", "all"]),
     default="all",
     help="Data source to generate",
 )
@@ -418,6 +454,11 @@ def main(
                 subscribers=int(100 * scale),
                 campaigns=int(20 * scale),
                 events=int(500 * scale),
+            )}
+        elif source == "ga4":
+            data = {"ga4": generator.generate_ga4_data(
+                num_users=int(200 * scale),
+                events_per_user=(3, 20),
             )}
 
     print("\n💾 Saving generated data...")

@@ -27,25 +27,36 @@ from typing import Optional
 
 from pyspark.sql import SparkSession
 from pyspark.sql import Window
+# count/first/max/min/sum shadow Python builtins. That is intentional and safe
+# here: this module uses them only as Spark column functions, never as builtins.
 from pyspark.sql.functions import (
     col,
     coalesce,
     concat,
+    count,
     current_date,
     current_timestamp,
     datediff,
     expr,
+    first,
     get_json_object,
+    hour,
+    lag,
     length,
     lit,
     lower,
+    max,
+    min,
     regexp_replace,
     round as spark_round,
     row_number,
     size,
     split,
+    sum,
     to_date,
     trim,
+    udf,
+    unix_timestamp,
     upper,
     when,
 )
@@ -1159,6 +1170,157 @@ def stage_mailchimp_subscribers(spark: SparkSession, mode: str = "incremental"):
     return deduped_count
 
 
+def stage_ga4_events(spark, mode="incremental"):
+    """Stage GA4 events with deduplication (Staff Engineer RC-2)."""
+    logger.info(f"Staging GA4 events (mode={mode})")
+
+    spark.sql("""
+        CREATE TABLE IF NOT EXISTS staging.stg_ga4_events (
+            client_id STRING, user_id STRING, session_id STRING, event_name STRING,
+            event_timestamp TIMESTAMP, page_location STRING, page_title STRING,
+            page_referrer STRING, engagement_time_ms BIGINT, traffic_source STRING,
+            traffic_medium STRING, traffic_campaign STRING, device_category STRING,
+            device_os STRING, device_browser STRING, geo_country STRING, geo_region STRING,
+            geo_city STRING, is_conversion BOOLEAN, event_value DECIMAL(18, 2),
+            currency STRING, event_date DATE, hour_of_day INT, is_ecommerce_event BOOLEAN,
+            is_engagement_event BOOLEAN, _raw_id STRING, _loaded_at TIMESTAMP, _staged_at TIMESTAMP
+        ) USING iceberg PARTITIONED BY (months(event_timestamp))
+    """)
+
+    raw_df = spark.table("iceberg.raw.ga4_events")
+
+    if mode == "incremental":
+        watermark = get_watermark(spark, "stg_ga4_events")
+        if watermark:
+            raw_df = raw_df.filter(col("_loaded_at") > watermark)
+            logger.info(f"Incremental filter: _loaded_at > {watermark}")
+        else:
+            logger.info("No watermark found, processing all data")
+
+    if raw_df.count() == 0:
+        logger.info("No new GA4 events"); return 0
+
+    # CRITICAL FIX #2: Deduplication works in BOTH incremental and full modes
+    # Natural key: (client_id, event_timestamp, event_name)
+    # Keeps latest record by _loaded_at DESC (handles late-arriving data)
+    dedup_window = Window.partitionBy("client_id", "event_timestamp", "event_name").orderBy(col("_loaded_at").desc())
+    staged_df = raw_df.withColumn("_dedup_rank", row_number().over(dedup_window)).filter(col("_dedup_rank") == 1).drop("_dedup_rank").select(
+        col("client_id"), col("user_id"), col("session_id"), col("event_name"),
+        expr("CAST(CAST(event_timestamp AS DOUBLE) / 1000000 AS TIMESTAMP)").alias("event_timestamp"),
+        get_json_object("traffic_source", "$.source").alias("traffic_source"),
+        get_json_object("traffic_source", "$.medium").alias("traffic_medium"),
+        get_json_object("traffic_source", "$.name").alias("traffic_campaign"),
+        get_json_object("device", "$.category").alias("device_category"),
+        get_json_object("device", "$.operating_system").alias("device_os"),
+        get_json_object("device", "$.web_info.browser").alias("device_browser"),
+        get_json_object("geo", "$.country").alias("geo_country"),
+        get_json_object("geo", "$.region").alias("geo_region"),
+        get_json_object("geo", "$.city").alias("geo_city"),
+        col("page_location"), col("page_title"), col("page_referrer"), col("engagement_time_ms"),
+        col("is_conversion"), col("value").cast("decimal(18,2)").alias("event_value"), col("currency"),
+        expr("CAST(CAST(CAST(event_timestamp AS DOUBLE) / 1000000 AS TIMESTAMP) AS DATE)").alias("event_date"),
+        hour(expr("CAST(CAST(event_timestamp AS DOUBLE) / 1000000 AS TIMESTAMP)")).alias("hour_of_day"),
+        when(col("event_name").isin("purchase", "add_to_cart", "begin_checkout", "view_item"), lit(True)).otherwise(lit(False)).alias("is_ecommerce_event"),
+        when(col("event_name").isin("scroll", "click", "video_start", "file_download"), lit(True)).otherwise(lit(False)).alias("is_engagement_event"),
+        col("_raw_id"), col("_loaded_at"), current_timestamp().alias("_staged_at")
+    )
+
+    if mode == "full":
+        staged_df.writeTo("iceberg.staging.stg_ga4_events").using("iceberg").createOrReplace()
+    else:
+        staged_df.writeTo("iceberg.staging.stg_ga4_events").using("iceberg").append()
+
+    record_count = staged_df.count()
+    logger.info(f"✅ Staged {record_count} GA4 events")
+    update_watermark(spark, "stg_ga4_events", record_count)
+    return record_count
+
+
+def compute_ga4_sessions(spark, mode="incremental"):
+    """Compute GA4 sessions from events using 30-min gap (Staff Engineer RC-4 fix)."""
+    logger.info(f"Computing GA4 sessions (mode={mode})")
+
+    spark.sql("""
+        CREATE TABLE IF NOT EXISTS staging.stg_ga4_sessions (
+            session_id STRING, client_id STRING, user_id STRING, session_start TIMESTAMP,
+            session_end TIMESTAMP, session_duration_sec INT, event_count INT, page_view_count INT,
+            is_engaged_session BOOLEAN, traffic_source STRING, traffic_medium STRING,
+            traffic_campaign STRING, channel_group STRING, landing_page STRING, exit_page STRING,
+            device_category STRING, device_os STRING, geo_country STRING, geo_region STRING,
+            total_engagement_ms BIGINT, conversions INT, total_value DECIMAL(18, 2),
+            session_date DATE, is_bounce BOOLEAN, _loaded_at TIMESTAMP, _staged_at TIMESTAMP
+        ) USING iceberg PARTITIONED BY (months(session_start))
+    """)
+
+    events_df = spark.table("iceberg.staging.stg_ga4_events")
+    if events_df.count() == 0: logger.info("No events"); return 0
+
+    client_win = Window.partitionBy("client_id").orderBy("event_timestamp")
+    events = events_df.withColumn("gap_sec", unix_timestamp("event_timestamp") - unix_timestamp(lag("event_timestamp").over(client_win))) \
+        .withColumn("new_sess", when(col("gap_sec").isNull(), lit(1)).when(col("gap_sec") > 1800, lit(1)).otherwise(lit(0))) \
+        .withColumn("sess_num", sum("new_sess").over(client_win))
+
+    sess_win = Window.partitionBy("client_id", "sess_num").orderBy("event_timestamp")
+    first_attrs = events.withColumn("rn", row_number().over(sess_win)).filter(col("rn") == 1).select(
+        col("client_id"), col("sess_num"), col("traffic_source").alias("t_src"),
+        col("traffic_medium").alias("t_med"), col("traffic_campaign").alias("t_camp"),
+        col("device_category").alias("d_cat"), col("device_os").alias("d_os"),
+        col("geo_country").alias("g_cty"), col("geo_region").alias("g_reg"),
+        when(col("event_name") == "page_view", col("page_location")).alias("land")
+    )
+
+    last_attrs = events.withColumn("rn", row_number().over(sess_win.orderBy(col("event_timestamp").desc()))) \
+        .filter((col("rn") == 1) & (col("event_name") == "page_view")).select(
+        col("client_id"), col("sess_num"), col("page_location").alias("exit")
+    )
+
+    sessions = events.groupBy("client_id", "sess_num").agg(
+        coalesce(first("session_id"), concat(col("client_id"), lit("_"), col("sess_num").cast("string"))).alias("session_id"),
+        first("user_id").alias("user_id"), min("event_timestamp").alias("session_start"),
+        max("event_timestamp").alias("session_end"),
+        (unix_timestamp(max("event_timestamp")) - unix_timestamp(min("event_timestamp"))).cast("int").alias("session_duration_sec"),
+        count("*").alias("event_count"),
+        sum(when(col("event_name") == "page_view", lit(1)).otherwise(lit(0))).alias("page_view_count"),
+        sum("engagement_time_ms").alias("total_engagement_ms"),
+        sum(when(col("is_conversion"), lit(1)).otherwise(lit(0))).alias("conversions"),
+        sum("event_value").alias("total_value"), to_date(min("event_timestamp")).alias("session_date"),
+        max("_loaded_at").alias("_loaded_at")
+    ).join(first_attrs, ["client_id", "sess_num"], "left").join(last_attrs, ["client_id", "sess_num"], "left")
+
+    def ch_grp(src, med):
+        if src == "(direct)" or (src == "(none)" and med == "(none)"): return "direct"
+        elif med in ("organic", "organic search"): return "organic_search"
+        elif med in ("cpc", "ppc", "paid search"): return "paid_search"
+        elif med in ("social", "social-network", "social media"): return "social"
+        elif med == "email": return "email"
+        elif med == "referral": return "referral"
+        elif med == "sms": return "sms"
+        else: return "other"
+
+    ch_udf = udf(ch_grp)
+    sessions = sessions.withColumn("channel_group", ch_udf(col("t_src"), col("t_med"))) \
+        .withColumn("traffic_source", col("t_src")).withColumn("traffic_medium", col("t_med")) \
+        .withColumn("traffic_campaign", col("t_camp")).withColumn("device_category", col("d_cat")) \
+        .withColumn("device_os", col("d_os")).withColumn("geo_country", col("g_cty")) \
+        .withColumn("geo_region", col("g_reg")).withColumn("landing_page", col("land")) \
+        .withColumn("exit_page", col("exit")) \
+        .withColumn("is_engaged_session", (col("total_engagement_ms") > 10000) | (col("page_view_count") >= 2) | (col("conversions") > 0)) \
+        .withColumn("is_bounce", (col("page_view_count") <= 1) & (~col("is_engaged_session"))) \
+        .withColumn("_staged_at", current_timestamp()) \
+        .drop("t_src", "t_med", "t_camp", "d_cat", "d_os", "g_cty", "g_reg", "land", "exit", "sess_num")
+
+    # Full recomputation regardless of mode: the read above is unfiltered,
+    # so this must replace rather than append. Appending a complete
+    # recomputation on top of the previous one duplicated the whole table on
+    # every scheduled run -- sessions went 308 -> 616 -> 924.
+    sessions.writeTo("iceberg.staging.stg_ga4_sessions").using("iceberg").createOrReplace()
+
+    record_count = sessions.count()
+    logger.info(f"✅ Computed {record_count} sessions")
+    update_watermark(spark, "stg_ga4_sessions", record_count)
+    return record_count
+
+
 # Mapping of table names to staging functions
 STAGING_FUNCTIONS = {
     "shopify_orders": stage_shopify_orders,
@@ -1169,6 +1331,8 @@ STAGING_FUNCTIONS = {
     "mailchimp_campaigns": stage_mailchimp_campaigns,
     "mailchimp_events": stage_mailchimp_events,
     "mailchimp_subscribers": stage_mailchimp_subscribers,
+    "ga4_events": stage_ga4_events,
+    "ga4_sessions": compute_ga4_sessions,
 }
 
 

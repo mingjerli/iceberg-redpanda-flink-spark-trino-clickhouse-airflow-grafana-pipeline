@@ -6,5 +6,12 @@ click>=8.1.0   # CLI interface
 tqdm>=4.66.0   # Progress bars
 requests>=2.31.0  # HTTP client for webhook simulation
 
+# GA4 is the one source delivered as files rather than webhooks, and
+# generator.py writes it with df.to_parquet(..., engine="pyarrow"). Without
+# these the GA4 branch of save_to_files() raises ModuleNotFoundError, so no
+# export is ever produced and the entire GA4 pipeline starts empty.
+pandas>=2.0.0
+pyarrow>=14.0.0
+
 # Optional: for Kafka/Redpanda output
 # confluent-kafka>=2.3.0

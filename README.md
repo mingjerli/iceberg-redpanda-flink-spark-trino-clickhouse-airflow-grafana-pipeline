@@ -1,6 +1,6 @@
 # Iceberg + Redpanda + Flink + Spark + Trino + ClickHouse + Airflow + Grafana Pipeline
 
-This is a production-style(but not production-ready) data platform combining real-time streaming and batch processing with Apache Iceberg as the unified storage layer. Demonstrates entity resolution across Shopify, Stripe, and HubSpot data sources.
+This is a production-style(but not production-ready) data platform combining real-time streaming and batch processing with Apache Iceberg as the unified storage layer. Demonstrates entity resolution across five sources: Shopify, Stripe, HubSpot and Mailchimp (webhooks), plus GA4 (batch Parquet export).
 
 **DISCLOSURE:Majority of the content are written with Claude(with human guided) ... as you can expected.**
 
@@ -41,6 +41,7 @@ As I tyied to make the pipeline more real, I fell into the rabbit hole of settin
 | Document | Purpose |
 |----------|---------|
 | [README.md](./README.md) | Quick start and overview (this file) |
+| [docs/index.html](./docs/index.html) | Control panel — every component UI, grouped by pipeline stage. Served at http://localhost:8087 once the stack is up |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | System design, infrastructure rationale, data layer philosophy |
 | [infrastructure/README.md](./infrastructure/README.md) | Service-by-service guide with tool selection rationale |
 | [docs/RUNBOOK.md](./docs/RUNBOOK.md) | Operational procedures and troubleshooting |
@@ -48,7 +49,8 @@ As I tyied to make the pipeline more real, I fell into the rabbit hole of settin
 ## Overview
 
 This demo simulates a modern data platform that:
-- Ingests data from **Shopify**(e-commerce store), **Stripe**(payment), and **HubSpot**(CRM) via webhooks
+- Ingests data from **Shopify**(e-commerce store), **Stripe**(payment), **HubSpot**(CRM), and **Mailchimp**(email marketing) via webhooks
+- Ingests **GA4**(web analytics) from Parquet exports in batch, standing in for a BigQuery Export
 - Stores data in **Apache Iceberg** tables with PostgreSQL catalog backend
 - Uses **Flink SQL** for real-time streaming from Kafka to Iceberg raw layer
 - Uses **Spark** for batch processing through staging → semantic → analytics → marts
@@ -132,7 +134,9 @@ docker exec iceberg-flink-jobmanager /opt/flink/bin/sql-client.sh embedded -e "
 
 ```bash
 # Submit all raw layer ingestion jobs
-for job in shopify_orders shopify_customers stripe_charges hubspot_contacts; do
+# GA4 is absent here on purpose: it has no Flink job, arriving as batch Parquet
+for job in shopify_orders shopify_customers stripe_charges stripe_customers \
+           hubspot_contacts mailchimp_campaigns mailchimp_events mailchimp_subscribers; do
     docker exec iceberg-flink-jobmanager /opt/flink/bin/sql-client.sh embedded \
         -f "/opt/flink/jobs/${job}_full.sql" &
     sleep 2
@@ -145,7 +149,7 @@ done
 # Install dependencies
 python3 -m venv .venv
 source .venv/bin/activate
-pip install click httpx faker
+pip install -r datagen/requirements.txt -r scripts/requirements.txt
 
 # Post mock data to webhook endpoints
 python scripts/post_mock_data.py \
@@ -202,6 +206,7 @@ docker exec iceberg-airflow-scheduler airflow dags trigger iceberg_pipeline
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
+| **Homepage** | **http://localhost:8087** | - |
 | Airflow | http://localhost:8086 | admin / admin123 |
 | Grafana | http://localhost:3000 | admin / admin123 |
 | Prometheus | http://localhost:9090 | - |
@@ -210,7 +215,17 @@ docker exec iceberg-airflow-scheduler airflow dags trigger iceberg_pipeline
 | MinIO Console | http://localhost:9001 | admin / admin123 |
 | Redpanda Console | http://localhost:8080 | - |
 | Trino | http://localhost:8085 | - |
-| Ingestion API | http://localhost:8090 | - |
+| ClickHouse | http://localhost:8123/play | - |
+| Iceberg REST Catalog | http://localhost:8181 | - |
+| Ingestion API | http://localhost:8090/docs | - |
+
+Every host port is overridable from `infrastructure/.env` — useful when a local
+dev server already owns one. Grafana (`EXTERNAL_GRAFANA_PORT`) and Redpanda's
+Schema Registry / HTTP Proxy / Admin API
+(`EXTERNAL_REDPANDA_SCHEMA_REGISTRY_PORT`, `EXTERNAL_REDPANDA_HTTP_PROXY_PORT`,
+`EXTERNAL_REDPANDA_ADMIN_PORT`) collide most often, since 3000/8081/8082 are
+common defaults elsewhere. Only the host side moves; container-internal
+addresses such as `redpanda:8081` are unaffected.
 
 ## Observing the Pipeline in Action
 
@@ -358,11 +373,15 @@ docker exec -it iceberg-spark-master /opt/spark/bin/spark-sql \
 
 | Layer | Description | Tables |
 |-------|-------------|--------|
-| **Raw** | Append-only webhook events | `raw.shopify_orders`, `raw.shopify_customers`, `raw.stripe_charges`, `raw.stripe_customers`, `raw.hubspot_contacts` |
-| **Staging** | Cleaned and typed data | `staging.stg_shopify_orders`, `staging.stg_shopify_customers`, `staging.stg_stripe_charges`, `staging.stg_stripe_customers`, `staging.stg_hubspot_contacts` |
+| **Raw** | Append-only source events | `raw.shopify_orders`, `raw.shopify_customers`, `raw.stripe_charges`, `raw.stripe_customers`, `raw.hubspot_contacts`, `raw.mailchimp_campaigns`, `raw.mailchimp_events`, `raw.mailchimp_subscribers`, `raw.ga4_events` |
+| **Staging** | Cleaned and typed data | `staging.stg_shopify_orders`, `staging.stg_shopify_customers`, `staging.stg_stripe_charges`, `staging.stg_stripe_customers`, `staging.stg_hubspot_contacts`, `staging.stg_mailchimp_campaigns`, `staging.stg_mailchimp_events`, `staging.stg_mailchimp_subscribers`, `staging.stg_ga4_events`, `staging.stg_ga4_sessions` |
 | **Semantic** | Entity resolution | `semantic.entity_index`, `semantic.blocking_index` |
-| **Analytics** | Aggregated metrics | `analytics.customer_metrics`, `analytics.order_summary`, `analytics.payment_metrics` |
-| **Marts** | Business-ready views | `marts.customer_360`, `marts.sales_dashboard_daily` |
+| **Analytics** | Aggregated metrics | `analytics.customer_metrics`, `analytics.order_summary`, `analytics.payment_metrics`, `analytics.campaign_metrics`, `analytics.ga4_engagement_metrics`, `analytics.ga4_engagement_by_channel`, `analytics.ga4_page_performance`, `analytics.ga4_funnel_analysis` |
+| **Marts** | Business-ready views | `marts.customer_360`, `marts.sales_dashboard_daily`, `marts.campaign_dashboard`, `marts.ga4_engagement_dashboard` |
+
+All layers except raw arrive via Spark batch jobs. Raw is fed by Flink SQL for the
+four webhook sources, and by `ga4_batch_ingest.py` for GA4, which reads Parquet
+exports from the volume mounted at `/opt/spark/data`.
 
 ## Configuration
 
@@ -386,6 +405,62 @@ STRIPE_CUSTOMERS=30
 STRIPE_CHARGES=80
 HUBSPOT_CONTACTS=40
 ```
+
+## Testing
+
+```bash
+# Whole suite (30 tests)
+./scripts/run_tests.sh
+
+# One file, or any pytest arguments
+./scripts/run_tests.sh tests/test_ga4_dedup.py
+./scripts/run_tests.sh -k dedup -vv
+```
+
+Tests run inside the project's Spark image, which already carries Java 11, Spark
+3.5.3, and the Iceberg runtime jars. Nothing else needs to be running: the suite
+uses a hadoop-type Iceberg catalog in a temp directory, so MinIO, Postgres, and
+the REST catalog can all be down. The script builds the image if it is missing.
+
+| Suite | Covers |
+|-------|--------|
+| `tests/test_ga4_provider.py` | GA4 export generation: schema, timestamps, session coherence, seed reproducibility |
+| `tests/test_ga4_dedup.py` | Staging deduplication in both full and incremental modes |
+| `tests/test_ga4_entity_resolution.py` | GA4 users joining entity resolution; blocking-index cardinality |
+| `tests/test_ga4_e2e.py` | Parquet → raw → staging → semantic → analytics → marts, plus ingest idempotency |
+
+The end-to-end suite calls the same functions the Airflow DAG invokes, so a
+signature drift between a job and its caller fails here rather than in a
+scheduled run.
+
+For row-count validation against a *running* stack, use
+`./scripts/validate_tables.sh` instead.
+
+### Verifying the Airflow DAG
+
+The unit suite and `reset_and_run.sh` both exercise the pipeline in **full**
+mode. The DAG runs everything in **incremental** mode, which is a genuinely
+different code path — and the one a 4-hour schedule actually uses. Verify it
+separately:
+
+```bash
+docker exec iceberg-airflow-scheduler airflow dags trigger iceberg_pipeline
+docker exec iceberg-airflow-scheduler airflow dags list-runs iceberg_pipeline
+```
+
+**Trigger it twice.** A single green run proves very little: appending duplicate
+rows is not an error, so a job can double a table and still report success. The
+real check is that a second run leaves every row count identical.
+
+```bash
+./scripts/validate_tables.sh   # before
+# ... trigger, wait for success ...
+./scripts/validate_tables.sh   # counts must match exactly
+```
+
+If a count grows on the second run, some job is reading its whole source table
+and appending the result — see the idempotency contract in
+[ARCHITECTURE.md](./ARCHITECTURE.md#the-idempotency-contract).
 
 ## Troubleshooting
 
@@ -466,10 +541,19 @@ iceberg-incremental-demo/
 │   ├── 03_core/
 │   ├── 04_analytics/
 │   └── 05_marts/
+├── docs/
+│   ├── index.html               # Control panel (open in a browser)
+│   ├── ARCHITECTURE.md          # see repo root
+│   └── RUNBOOK.md               # Operational procedures
 ├── scripts/                     # Utility scripts
 │   ├── reset_and_run.sh         # Main setup script (--help for options)
+│   ├── run_tests.sh             # Run the test suite in the Spark image
 │   ├── validate_tables.sh       # Quick table validation
 │   └── post_mock_data.py        # Mock data generator
+├── tests/                       # Pytest suite
+│   ├── conftest.py              # SparkSession and sample-data fixtures
+│   └── pipeline_tables.py       # Iceberg DDL and row-insert helpers
+├── requirements-dev.txt         # Test dependencies
 └── schemas/                     # API JSON schemas
 ```
 

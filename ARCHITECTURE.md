@@ -3,97 +3,100 @@
 ## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────────────────────────────────┐
 │                              EXTERNAL DATA SOURCES                               │
-│                     Shopify    │    Stripe    │    HubSpot                       │
-│                   (Webhooks)   │  (Webhooks)  │  (Webhooks)                      │
-└───────────────────────┬────────────────┬────────────────┬────────────────────────┘
-                        │                │                │
-                        ▼                ▼                ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
+│                                                                                  │
+│   Shopify  │  Stripe  │  HubSpot  │  Mailchimp    ‖         GA4                  │
+│  (Webhook) │ (Webhook)│ (Webhook) │  (Webhook)    ‖   (Parquet export)           │
+└────────────────────────┬──────────────────────────╨──────────────┬───────────────┘
+                         │ streaming                               │ batch
+                         ▼                                         │
+┌──────────────────────────────────────────────────────────────────────────────────┐
 │                         INGESTION LAYER (FastAPI)                                │
-│  ┌─────────────────────────────────────────────────────────────────────────┐    │
-│  │  Ingestion API (Port 8090)                                              │    │
-│  │  - Receives webhooks from Shopify, Stripe, HubSpot                      │    │
-│  │  - Validates webhook signatures                                          │    │
-│  │  - Publishes events to Kafka topics                                      │    │
-│  └───────────────────────────────────┬─────────────────────────────────────┘    │
-└──────────────────────────────────────┼──────────────────────────────────────────┘
-                                       │
-                                       ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
+│  ┌─────────────────────────────────────────────────────────────────────────┐     │
+│  │  Ingestion API (Port 8090)                                              │     │
+│  │  - Receives webhooks from the four streaming sources                    │     │
+│  │  - Validates webhook signatures (HMAC)                                  │     │
+│  │  - Publishes events to Kafka topics                                     │     │
+│  └───────────────────────────────────┬─────────────────────────────────────┘     │
+└──────────────────────────────────────┼───────────────────────────────────────────┘
+                                       │                                   │
+                                       ▼                                   │
+┌──────────────────────────────────────────────────────────────────────────────────┐
 │                         MESSAGE QUEUE (Redpanda)                                 │
-│  ┌─────────────────────────────────────────────────────────────────────────┐    │
-│  │  Kafka-Compatible Topics:                                                │    │
-│  │  • shopify.orders       • shopify.customers                             │    │
-│  │  • stripe.charges       • stripe.customers                              │    │
-│  │  • hubspot.contacts     • hubspot.companies                             │    │
-│  └───────────────────────────────────┬─────────────────────────────────────┘    │
-└──────────────────────────────────────┼──────────────────────────────────────────┘
-                                       │
-                                       ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
+│  ┌─────────────────────────────────────────────────────────────────────────┐     │
+│  │  Kafka-Compatible Topics:                                               │     │
+│  │  • shopify.orders       • shopify.customers                             │     │
+│  │  • stripe.charges       • stripe.customers                              │     │
+│  │  • hubspot.contacts     • hubspot.companies                             │     │
+│  │  • mailchimp.campaigns  • mailchimp.events    • mailchimp.subscribers   │     │
+│  │  (GA4 has no topic — it never enters the stream)                        │     │
+│  └───────────────────────────────────┬─────────────────────────────────────┘     │
+└──────────────────────────────────────┼───────────────────────────────────────────┘
+                                       │                                   │
+                                       ▼                    ga4_batch_ingest.py
+┌──────────────────────────────────────────────────────────────────────────────────┐
 │                      STREAMING LAYER (Apache Flink)                              │
-│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  ┌─────────────────────────────────────────────────────────────────────────┐     │
 │  │  Flink SQL Jobs:                                                         │    │
-│  │  • shopify_orders_full.sql    → raw.shopify_orders                      │    │
-│  │  • shopify_customers_full.sql → raw.shopify_customers                   │    │
-│  │  • stripe_charges_full.sql    → raw.stripe_charges                      │    │
-│  │  • stripe_customers_full.sql  → raw.stripe_customers                    │    │
-│  │  • hubspot_contacts_full.sql  → raw.hubspot_contacts                    │    │
-│  └───────────────────────────────────┬─────────────────────────────────────┘    │
-└──────────────────────────────────────┼──────────────────────────────────────────┘
+│  │  • shopify_orders_full.sql    → raw.shopify_orders                      │     │
+│  │  • shopify_customers_full.sql → raw.shopify_customers                   │     │
+│  │  • stripe_charges_full.sql    → raw.stripe_charges                      │     │
+│  │  • stripe_customers_full.sql  → raw.stripe_customers                    │     │
+│  │  • hubspot_contacts_full.sql  → raw.hubspot_contacts                    │     │
+│  └───────────────────────────────────┬─────────────────────────────────────┘     │
+└──────────────────────────────────────┼───────────────────────────────────────────┘
                                        │
                                        ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────────────────────────────────┐
 │                         STORAGE LAYER (Apache Iceberg)                           │
 │                                                                                  │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────────────┐   │
-│  │  MinIO (S3)      │  │  Iceberg REST    │  │  PostgreSQL Catalog          │   │
-│  │  - Data files    │  │  - Catalog API   │  │  - Table metadata            │   │
-│  │  - warehouse/    │  │  - Port 8181     │  │  - Namespace definitions     │   │
-│  │  - Parquet files │  │                  │  │  - Snapshot history          │   │
-│  └──────────────────┘  └──────────────────┘  └──────────────────────────────┘   │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────────────┐    │
+│  │  MinIO (S3)      │  │  Iceberg REST    │  │  PostgreSQL Catalog          │    │
+│  │  - Data files    │  │  - Catalog API   │  │  - Table metadata            │    │
+│  │  - warehouse/    │  │  - Port 8181     │  │  - Namespace definitions     │    │
+│  │  - Parquet files │  │                  │  │  - Snapshot history          │    │
+│  └──────────────────┘  └──────────────────┘  └──────────────────────────────┘    │
 │                                                                                  │
 │  Data Layers (Iceberg Tables):                                                   │
 │  ┌────────┐  ┌──────────┐  ┌──────────┐  ┌───────────┐  ┌────────┐             │
 │  │  RAW   │→ │ STAGING  │→ │ SEMANTIC │→ │ ANALYTICS │→ │ MARTS  │             │
 │  └────────┘  └──────────┘  └──────────┘  └───────────┘  └────────┘             │
-└─────────────────────────────────────────────────────────────────────────────────┘
+└──────────────────────────────────────────────────────────────────────────────────┘
                                        │
                                        ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────────────────────────────────┐
 │                      BATCH PROCESSING (Apache Spark)                             │
-│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  ┌─────────────────────────────────────────────────────────────────────────┐     │
 │  │  Spark Jobs:                                                             │    │
-│  │  • staging_batch.py       - Raw → Staging transformations               │    │
-│  │  • entity_backfill.py     - Entity resolution across sources            │    │
-│  │  • analytics_incremental.py - Staging/Core → Analytics metrics          │    │
-│  │  • marts_incremental.py   - Analytics → Business marts                  │    │
-│  └─────────────────────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────────────────────┘
+│  │  • staging_batch.py       - Raw → Staging transformations               │     │
+│  │  • entity_backfill.py     - Entity resolution across sources            │     │
+│  │  • analytics_incremental.py - Staging/Core → Analytics metrics          │     │
+│  │  • marts_incremental.py   - Analytics → Business marts                  │     │
+│  └─────────────────────────────────────────────────────────────────────────┘     │
+└──────────────────────────────────────────────────────────────────────────────────┘
                                        │
                                        ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────────────────────────────────┐
 │                      ORCHESTRATION (Apache Airflow)                              │
-│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  ┌─────────────────────────────────────────────────────────────────────────┐     │
 │  │  DAG: iceberg_pipeline                                                   │    │
-│  │  • Staging tasks (4 tables)                                             │    │
-│  │  • Semantic tasks (entity resolution)                                   │    │
-│  │  • Analytics tasks (3 metrics)                                          │    │
-│  │  • Marts tasks (dashboards)                                             │    │
-│  └─────────────────────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────────────────────┘
+│  │  • Staging tasks (4 tables)                                             │     │
+│  │  • Semantic tasks (entity resolution)                                   │     │
+│  │  • Analytics tasks (3 metrics)                                          │     │
+│  │  • Marts tasks (dashboards)                                             │     │
+│  └─────────────────────────────────────────────────────────────────────────┘     │
+└──────────────────────────────────────────────────────────────────────────────────┘
                                        │
                                        ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────────────────────────────────┐
 │                          QUERY ENGINES                                           │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────────────┐  │
-│  │  Trino          │  │  Spark SQL      │  │  ClickHouse                     │  │
-│  │  - Ad-hoc       │  │  - Batch        │  │  - OLAP                         │  │
-│  │  - Port 8085    │  │  - Port 8084    │  │  - Real-time analytics          │  │
-│  └─────────────────┘  └─────────────────┘  └─────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────────┘
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────────────┐   │
+│  │  Trino          │  │  Spark SQL      │  │  ClickHouse                     │   │
+│  │  - Ad-hoc       │  │  - Batch        │  │  - OLAP                         │   │
+│  │  - Port 8085    │  │  - Port 8084    │  │  - Real-time analytics          │   │
+│  └─────────────────┘  └─────────────────┘  └─────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -265,7 +268,7 @@ Never modify raw. If you need to fix data, fix it in staging.
 **Purpose:** Create unified identities across multiple source systems.
 
 **Why it exists:**
-- **Unified customer profile**: The same person exists in Shopify (by email), Stripe (by customer ID), and HubSpot (by contact ID)
+- **Unified customer profile**: The same person exists in Shopify (by email), Stripe (by customer ID), HubSpot (by contact ID), Mailchimp (by normalized email) and GA4 (by `user_id`, set on logged-in sessions only)
 - **Deduplication**: Multiple records in the same system may represent the same entity
 - **Attribution**: Connect orders to the right customer across systems
 
@@ -324,7 +327,7 @@ A ↔ B ↔ C ↔ D ↔ E             Block: gmail.com
 CREATE TABLE semantic.blocking_index (
     blocking_key STRING,    -- e.g., 'gmail.com' or '415'
     blocking_type STRING,   -- 'email_domain', 'phone_area', 'name_prefix'
-    source STRING,          -- 'shopify', 'stripe', 'hubspot'
+    source STRING,          -- 'shopify_customers', 'stripe_customers', 'hubspot_contacts', 'mailchimp_subscribers', 'ga4_sessions'
     source_id STRING,       -- Original ID in source system
     created_at TIMESTAMP
 )
@@ -403,15 +406,23 @@ If you're writing complex SQL in a mart, the logic probably belongs in analytics
 
 ## Data Flow
 
-### Phase 1: Webhook Ingestion
+### Phase 1: Ingestion
+
+Two ingress paths converge on the raw layer.
 
 ```
-Shopify/Stripe/HubSpot → Ingestion API → Redpanda Topics
+Shopify/Stripe/HubSpot/Mailchimp → Ingestion API → Redpanda Topics    (streaming)
+GA4 Parquet export ─────────────→ ga4_batch_ingest.py → raw.ga4_events (batch)
 ```
 
 1. External systems send webhook events to the Ingestion API
 2. The API validates the request and extracts the payload
 3. Events are published to source-specific Kafka topics
+
+GA4 is deliberately different. A real BigQuery Export is a file drop, not a
+webhook, so `ga4_batch_ingest.py` reads Parquet from the volume mounted at
+`/opt/spark/data` and MERGEs it straight into `raw.ga4_events`, skipping
+Redpanda and Flink entirely.
 
 ### Phase 2: Raw Layer (Streaming)
 
@@ -630,7 +641,7 @@ CREATE TABLE staging.stg_shopify_orders (
 ```sql
 CREATE TABLE semantic.entity_index (
     entity_id STRING,          -- Unified customer ID
-    source STRING,             -- 'shopify', 'stripe', 'hubspot'
+    source STRING,             -- 'shopify_customers', 'stripe_customers', 'hubspot_contacts', 'mailchimp_subscribers', 'ga4_sessions'
     source_id STRING,          -- Original ID in source system
     email STRING,
     email_normalized STRING,
@@ -673,6 +684,39 @@ CREATE TABLE metadata.incremental_watermarks (
 - **Lower Latency**: Faster job completion for smaller data volumes
 - **Resource Optimization**: Reduced Spark executor memory/time
 - **Fault Tolerance**: Resume from last successful point
+
+### The idempotency contract
+
+Every job runs repeatedly — Airflow retries, a 4-hour schedule, a manual
+re-trigger — so **the write mode has to match the read scope**. There are only
+two valid combinations:
+
+| Read | Write | Example |
+|------|-------|---------|
+| Filtered by watermark (`_loaded_at > last`) | `append` | `stage_ga4_events` |
+| Unfiltered — reads the whole source table | `createOrReplace` (or `MERGE` on the grain key) | `compute_ga4_sessions`, every `compute_ga4_*` analytics job |
+
+Mixing them is silently destructive. An unfiltered read followed by `append`
+stacks a complete recomputation on top of the previous one on every run: GA4
+sessions went 308 → 616 → 924, analytics gained a second row per `metric_date`,
+and the marts `MERGE` — the only job keyed on that grain — then failed with
+`MERGE_CARDINALITY_VIOLATION`. Nothing upstream complained, because appending
+duplicates is not an error.
+
+Two related traps:
+
+- **Do not update the watermark column on re-ingest.** `raw.ga4_events` is
+  MERGEd on `_raw_id`; a `WHEN MATCHED THEN UPDATE SET *` rewrites `_loaded_at`,
+  pushing every existing row past the staging watermark so the next incremental
+  run re-stages the entire table. The ingest is insert-only for this reason:
+  `_raw_id` hashes the natural key, so a match is the same immutable event.
+- **Idempotency must be asserted below the layer you changed.** A test that
+  re-runs the ingest and checks only `raw`'s row count passes happily while
+  every table beneath it doubles. `test_e2e_ga4_idempotency` now asserts staging
+  and sessions are unchanged on a second pass.
+
+The practical check: run the same job twice against unchanged input. Every row
+count must be identical.
 
 ## Security Considerations
 

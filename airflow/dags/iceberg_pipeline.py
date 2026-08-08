@@ -2,13 +2,14 @@
 Airflow DAG: Iceberg Data Pipeline
 ==================================
 
-Batch data pipeline for processing Shopify, Stripe, HubSpot, and Mailchimp data
+Batch data pipeline for processing Shopify, Stripe, HubSpot, Mailchimp, and GA4 data
 through staging, semantic, core, analytics, and marts layers using Apache Iceberg.
 
 Layer flow:
-    raw (Flink streaming) -> staging -> semantic -> core -> analytics -> marts
+    raw (Flink streaming or batch) -> staging -> semantic -> core -> analytics -> marts
 
 Each layer has specific Spark jobs:
+- ga4_batch_ingest.py: GA4 Parquet -> Raw (batch ingestion)
 - staging_batch.py: Raw -> Staging transforms
 - entity_backfill.py: Entity resolution
 - core_views.py: Unified business objects
@@ -35,6 +36,10 @@ SPARK_MASTER = os.environ.get("SPARK_MASTER", "spark://spark-master:7077")
 # Get credentials from environment variables (set in docker-compose.yml)
 MINIO_ROOT_USER = os.environ.get("MINIO_ROOT_USER", "admin")
 MINIO_ROOT_PASSWORD = os.environ.get("MINIO_ROOT_PASSWORD", "admin123")
+
+# GA4 arrives as Parquet on the volume mounted into the Spark containers,
+# standing in for a BigQuery Export. Default matches infrastructure/.env.example.
+GA4_EXPORT_PATH = os.environ.get("GA4_EXPORT_PATH", "/opt/spark/data/ga4/events.parquet")
 
 SPARK_SUBMIT = (
     f"docker exec {SPARK_CONTAINER} /opt/spark/bin/spark-submit "
@@ -71,7 +76,7 @@ default_args = {
 
 with DAG(
     dag_id="iceberg_pipeline",
-    description="Iceberg data pipeline: staging -> semantic -> core -> analytics -> marts (Shopify, Stripe, HubSpot, Mailchimp)",
+    description="Iceberg data pipeline: staging -> semantic -> core -> analytics -> marts (Shopify, Stripe, HubSpot, Mailchimp, GA4)",
     default_args=default_args,
     schedule="0 */4 * * *",
     start_date=datetime(2026, 1, 1),
@@ -125,6 +130,34 @@ with DAG(
     )
 
     # -------------------------------------------------------------------------
+    # GA4 Batch Ingestion: Parquet -> Raw
+    # -------------------------------------------------------------------------
+    ga4_batch_ingest = BashOperator(
+        task_id="ga4_batch_ingest",
+        # --input is required; MERGE INTO on _raw_id makes re-runs idempotent,
+        # so append is the correct mode for a scheduled task.
+        bash_command=(
+            f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/ga4_batch_ingest.py "
+            f"--input {GA4_EXPORT_PATH} --mode append"
+        ),
+    )
+
+    # -------------------------------------------------------------------------
+    # GA4 Staging: Raw -> Staging
+    # -------------------------------------------------------------------------
+    # --table takes the STAGING_FUNCTIONS key, which carries no stg_ prefix
+    # (`ga4_events`, not `stg_ga4_events`). The prefixed form is the Iceberg
+    # table name; passing it here is rejected by argparse before Spark starts.
+    stg_ga4_events = BashOperator(
+        task_id="stg_ga4_events",
+        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/staging_batch.py --table ga4_events --mode incremental",
+    )
+    stg_ga4_sessions = BashOperator(
+        task_id="stg_ga4_sessions",
+        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/staging_batch.py --table ga4_sessions --mode incremental",
+    )
+
+    # -------------------------------------------------------------------------
     # Semantic Layer: entity resolution
     # Depends on customer data from staging
     # -------------------------------------------------------------------------
@@ -171,6 +204,24 @@ with DAG(
         bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/analytics_incremental.py --table campaign_metrics --mode incremental",
     )
 
+    # GA4 Analytics
+    ga4_engagement_metrics = BashOperator(
+        task_id="ga4_engagement_metrics",
+        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/analytics_incremental.py --table ga4_engagement_metrics --mode incremental",
+    )
+    ga4_engagement_by_channel = BashOperator(
+        task_id="ga4_engagement_by_channel",
+        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/analytics_incremental.py --table ga4_engagement_by_channel --mode incremental",
+    )
+    ga4_page_performance = BashOperator(
+        task_id="ga4_page_performance",
+        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/analytics_incremental.py --table ga4_page_performance --mode incremental",
+    )
+    ga4_funnel_analysis = BashOperator(
+        task_id="ga4_funnel_analysis",
+        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/analytics_incremental.py --table ga4_funnel_analysis --mode incremental",
+    )
+
     # -------------------------------------------------------------------------
     # Marts Layer: dashboard-ready tables
     # Depends on analytics
@@ -187,33 +238,47 @@ with DAG(
         task_id="campaign_dashboard",
         bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/marts_incremental.py --table campaign_dashboard --mode incremental",
     )
+    ga4_engagement_dashboard = BashOperator(
+        task_id="ga4_engagement_dashboard",
+        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/marts_incremental.py --table ga4_engagement_dashboard --mode incremental",
+    )
 
     # -------------------------------------------------------------------------
     # Dependencies
     # -------------------------------------------------------------------------
 
-    # Staging: parallel from start
+    # Staging: parallel from start (webhook sources)
     start >> [stg_shopify_orders, stg_shopify_customers, stg_stripe_charges, stg_stripe_customers, stg_hubspot_contacts,
               stg_mailchimp_campaigns, stg_mailchimp_events, stg_mailchimp_subscribers]
 
-    # Semantic: needs customer data from all sources
-    [stg_shopify_customers, stg_stripe_customers, stg_hubspot_contacts, stg_mailchimp_subscribers] >> entity_index
+    # GA4: batch ingestion -> staging events -> staging sessions
+    start >> ga4_batch_ingest >> stg_ga4_events >> stg_ga4_sessions
+
+    # Semantic: needs customer data from all sources (including GA4)
+    [stg_shopify_customers, stg_stripe_customers, stg_hubspot_contacts, stg_mailchimp_subscribers, stg_ga4_sessions] >> entity_index
     entity_index >> blocking_index
 
     # Core: needs semantic + staging (Mailchimp does not feed into core)
     [entity_index, stg_shopify_customers, stg_stripe_customers, stg_hubspot_contacts] >> core_customers
     [stg_shopify_orders, core_customers] >> core_orders
 
-    # Analytics: needs core + Mailchimp staging
+    # Analytics: needs core + Mailchimp staging + GA4 staging
     [core_customers, core_orders] >> customer_metrics
     core_orders >> order_summary
     stg_stripe_charges >> payment_metrics
     [stg_mailchimp_campaigns, stg_mailchimp_events] >> campaign_metrics
 
+    # GA4 Analytics: needs GA4 staging (parallel execution)
+    [stg_ga4_events, stg_ga4_sessions] >> ga4_engagement_metrics
+    [stg_ga4_events, stg_ga4_sessions] >> ga4_engagement_by_channel
+    [stg_ga4_events, stg_ga4_sessions] >> ga4_page_performance
+    [stg_ga4_events, stg_ga4_sessions] >> ga4_funnel_analysis
+
     # Marts: needs analytics
     customer_metrics >> customer_360
     [order_summary, payment_metrics] >> sales_dashboard
     campaign_metrics >> campaign_dashboard
+    [ga4_engagement_metrics, ga4_engagement_by_channel, ga4_page_performance, ga4_funnel_analysis] >> ga4_engagement_dashboard
 
     # End
-    [customer_360, sales_dashboard, campaign_dashboard] >> end
+    [customer_360, sales_dashboard, campaign_dashboard, ga4_engagement_dashboard] >> end

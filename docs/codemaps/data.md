@@ -16,6 +16,7 @@
 | `raw.mailchimp_campaigns` | mailchimp.campaigns topic | months(send_time) | campaign_id |
 | `raw.mailchimp_events` | mailchimp.events topic | months(event_timestamp) | event_id |
 | `raw.mailchimp_subscribers` | mailchimp.subscribers topic | months(timestamp_signup) | subscriber_id |
+| `raw.ga4_events` | Parquet export (no topic) | event_date | _raw_id (sha256 of client_id\|event_timestamp\|event_name) |
 
 **Common metadata:** `_raw_id STRING`, `_webhook_topic STRING`, `_loaded_at TIMESTAMP`
 
@@ -27,6 +28,8 @@
 | `staging.stg_shopify_customers` | ~7K | customer_tier derivation, address normalization |
 | `staging.stg_stripe_charges` | ~8K | Amount cents->dollars, risk scoring, card metadata |
 | `staging.stg_stripe_customers` | ~8K | Balance normalization, delinquency flags |
+| `staging.stg_ga4_events` | ~2K | JSON extraction, dedup on (client_id, event_timestamp, event_name) |
+| `staging.stg_ga4_sessions` | ~300 | Sessionization by 30-min inactivity gap, first/last attribution |
 | `staging.stg_hubspot_contacts` | ~8K | Lifecycle stage normalization, engagement scoring |
 | `staging.stg_mailchimp_campaigns` | ~8K | Campaign type, rate calculations |
 | `staging.stg_mailchimp_events` | ~9K | Action normalization, engagement flags |

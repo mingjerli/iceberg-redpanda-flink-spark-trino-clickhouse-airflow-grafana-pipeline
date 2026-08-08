@@ -178,6 +178,67 @@ curl http://localhost:8083/jobs/overview
 2. Check Flink job status and restart if needed
 3. Verify Redpanda connectivity
 
+**If the API returns 500 on every webhook**, check its logs before anything
+else — a dependency mismatch there stops all four streaming sources at once
+while the data poster still prints progress:
+
+```bash
+docker logs iceberg-ingestion-api --tail 50 | grep -i "error\|traceback"
+```
+
+### GA4 Tables Empty
+
+**Symptoms:** every other source has data; only `raw.ga4_events` is 0
+
+GA4 uses no webhooks, Redpanda or Flink, so none of the checks above apply. It
+is a file drop: `datagen/generator.py --source ga4` writes
+`datagen/output/ga4/events.parquet`, mounted read-only into Spark at
+`/opt/spark/data/ga4/events.parquet`, and `ga4_batch_ingest.py` MERGEs it in.
+
+**Diagnosis:**
+```bash
+# Does the export exist on the host?
+ls -la datagen/output/ga4/
+
+# Can Spark see it through the mount?
+docker exec iceberg-spark-master ls -la /opt/spark/data/ga4/
+
+# Can the generator write Parquet at all? (needs pandas + pyarrow)
+docker exec iceberg-datagen python -c "import pandas, pyarrow"
+```
+
+**Resolution:**
+1. No file on the host → generation never ran, or its deps are missing
+2. File on the host but not in the container → the volume mount is wrong
+3. File visible but `raw.ga4_events` still 0 → check the ingest task log; its
+   `--input` must match `GA4_EXPORT_PATH`
+
+### GA4 Row Counts Growing Every Run
+
+**Symptoms:** `stg_ga4_sessions` doubles on each scheduled DAG run
+(308 → 616 → 924); `marts.ga4_engagement_dashboard` eventually fails with
+`MERGE_CARDINALITY_VIOLATION`
+
+**Cause:** a job reading its whole source table while writing with `append`.
+Duplicate rows raise no error, so this compounds silently until the one job
+keyed by `MERGE` rejects the ambiguity.
+
+**Diagnosis:**
+```bash
+docker exec iceberg-trino trino --execute "
+SELECT COUNT(*) FROM (
+  SELECT client_id, event_timestamp, event_name
+  FROM iceberg.staging.stg_ga4_events
+  GROUP BY 1,2,3 HAVING COUNT(*) > 1)"
+```
+Non-zero means duplication has already happened.
+
+**Resolution:**
+1. Rebuild the affected tables with `--mode full` — `createOrReplace` clears them
+2. Fix the offending job against the idempotency contract in
+   [ARCHITECTURE.md](../ARCHITECTURE.md#the-idempotency-contract)
+3. Confirm by triggering the DAG twice: counts must be identical
+
 ### Staging Data Stale
 
 **Symptoms:** Raw count >> Staging count

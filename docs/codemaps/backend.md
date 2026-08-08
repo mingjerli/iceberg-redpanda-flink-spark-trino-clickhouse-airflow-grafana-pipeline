@@ -64,6 +64,8 @@ jobs/flink/
 ├── mailchimp_events_full.sql       # Kafka(mailchimp.events) -> raw.mailchimp_events
 ├── mailchimp_subscribers_full.sql  # Kafka(mailchimp.subscribers) -> raw.mailchimp_subscribers
 ├── entity_resolution_exact.sql     # Real-time exact entity matching
+│   # NB: GA4 has no Flink job -- it is batch-ingested by
+│   #     jobs/spark/ga4_batch_ingest.py straight into raw.ga4_events
 └── stg_shopify_orders_full.sql     # Streaming staging example
 ```
 

@@ -99,6 +99,55 @@ TTL event_time + INTERVAL 7 DAY
 SETTINGS index_granularity = 8192;
 
 -- =============================================================================
+-- GA4 Engagement Metrics (Daily)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS analytics.ga4_engagement_daily
+(
+    event_date Date,
+    traffic_source LowCardinality(String),
+    device_category LowCardinality(String),
+    geo_country LowCardinality(String),
+    total_sessions UInt64,
+    total_events UInt64,
+    total_page_views UInt64,
+    engaged_sessions UInt64,
+    bounced_sessions UInt64,
+    unique_users UInt64,
+    engagement_rate Float32,
+    bounce_rate Float32,
+    avg_session_duration Float32,
+    _synced_at DateTime DEFAULT now()
+)
+ENGINE = SummingMergeTree()
+ORDER BY (event_date, traffic_source, device_category, geo_country)
+PARTITION BY toYYYYMM(event_date)
+SETTINGS index_granularity = 8192;
+
+-- =============================================================================
+-- GA4 Funnel Analysis (Daily)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS analytics.ga4_funnel_daily
+(
+    event_date Date,
+    total_users UInt64,
+    page_view_users UInt64,
+    view_item_users UInt64,
+    add_to_cart_users UInt64,
+    begin_checkout_users UInt64,
+    purchase_users UInt64,
+    page_view_to_view_item_rate Float32,
+    view_item_to_add_to_cart_rate Float32,
+    add_to_cart_to_checkout_rate Float32,
+    checkout_to_purchase_rate Float32,
+    overall_conversion_rate Float32,
+    _synced_at DateTime DEFAULT now()
+)
+ENGINE = ReplacingMergeTree(_synced_at)
+ORDER BY event_date
+PARTITION BY toYYYYMM(event_date)
+SETTINGS index_granularity = 8192;
+
+-- =============================================================================
 -- Aggregated Views for Dashboards
 -- =============================================================================
 
@@ -137,3 +186,45 @@ SELECT
 FROM analytics.payment_metrics_daily
 GROUP BY card_brand
 ORDER BY gross_volume DESC;
+
+-- GA4 engagement trends (7-day rolling)
+CREATE VIEW IF NOT EXISTS analytics.ga4_engagement_trends AS
+SELECT
+    event_date,
+    sum(total_sessions) as total_sessions,
+    sum(engaged_sessions) as engaged_sessions,
+    avg(engagement_rate) as avg_engagement_rate,
+    avg(bounce_rate) as avg_bounce_rate,
+    avg(avg_session_duration) as avg_session_duration,
+    sum(unique_users) as unique_users
+FROM analytics.ga4_engagement_daily
+WHERE event_date >= today() - 7
+GROUP BY event_date
+ORDER BY event_date DESC;
+
+-- GA4 traffic source performance
+CREATE VIEW IF NOT EXISTS analytics.ga4_traffic_performance AS
+SELECT
+    traffic_source,
+    sum(total_sessions) as total_sessions,
+    sum(engaged_sessions) as engaged_sessions,
+    avg(engagement_rate) as avg_engagement_rate,
+    avg(bounce_rate) as avg_bounce_rate,
+    sum(unique_users) as unique_users
+FROM analytics.ga4_engagement_daily
+WHERE event_date >= today() - 30
+GROUP BY traffic_source
+ORDER BY total_sessions DESC;
+
+-- GA4 device performance
+CREATE VIEW IF NOT EXISTS analytics.ga4_device_performance AS
+SELECT
+    device_category,
+    sum(total_sessions) as total_sessions,
+    sum(engaged_sessions) as engaged_sessions,
+    avg(engagement_rate) as avg_engagement_rate,
+    avg(bounce_rate) as avg_bounce_rate
+FROM analytics.ga4_engagement_daily
+WHERE event_date >= today() - 30
+GROUP BY device_category
+ORDER BY total_sessions DESC;
