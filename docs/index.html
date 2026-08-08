@@ -230,13 +230,14 @@
       <span class="fact"><b>5</b><span>sources</span></span>
       <span class="fact"><b>6</b><span>layers</span></span>
       <span class="fact"><b>20</b><span>containers</span></span>
-      <span class="fact"><b>13</b><span>service UIs</span></span>
+      <span class="fact"><b>14</b><span>service UIs</span></span>
     </div>
   </header>
 
   <p class="snapshot">
     <b>Links point at localhost.</b> They resolve only while the stack is up &mdash;
-    start it with <b>docker-compose up -d</b> in <b>infrastructure/</b>, or
+    this page is served by the stack&rsquo;s own <code>homepage</code> container on
+    port 8087. Start everything with <b>docker-compose up -d</b> in <b>infrastructure/</b>, or
     <b>./scripts/reset_and_run.sh</b> for a full reset and pipeline run. Ports come
     from <code>infrastructure/.env</code>; if you have overridden any, the links
     below follow the defaults.

@@ -41,7 +41,7 @@ As I tyied to make the pipeline more real, I fell into the rabbit hole of settin
 | Document | Purpose |
 |----------|---------|
 | [README.md](./README.md) | Quick start and overview (this file) |
-| [docs/index.html](./docs/index.html) | Control panel — every component UI, grouped by pipeline stage. Open it once the stack is up: `open docs/index.html` |
+| [docs/index.html](./docs/index.html) | Control panel — every component UI, grouped by pipeline stage. Served at http://localhost:8087 once the stack is up |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | System design, infrastructure rationale, data layer philosophy |
 | [infrastructure/README.md](./infrastructure/README.md) | Service-by-service guide with tool selection rationale |
 | [docs/RUNBOOK.md](./docs/RUNBOOK.md) | Operational procedures and troubleshooting |
@@ -206,6 +206,7 @@ docker exec iceberg-airflow-scheduler airflow dags trigger iceberg_pipeline
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
+| **Homepage** | **http://localhost:8087** | - |
 | Airflow | http://localhost:8086 | admin / admin123 |
 | Grafana | http://localhost:3000 | admin / admin123 |
 | Prometheus | http://localhost:9090 | - |

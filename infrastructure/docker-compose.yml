@@ -816,6 +816,29 @@ services:
     networks:
       - iceberg-network
 
+  # ===========================================================================
+  # Homepage - Static control panel linking every component UI
+  # ===========================================================================
+  # Gives the stack a front door. docs/index.html groups each service by its
+  # stage in the pipeline; the Markdown docs alongside it are served too.
+  # Read-only mount, so nothing here can modify the repo.
+  homepage:
+    image: nginx:alpine
+    container_name: iceberg-homepage
+    hostname: homepage
+    ports:
+      - "${EXTERNAL_HOMEPAGE_PORT:-8087}:80"
+    volumes:
+      - ../docs:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/index.html"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - iceberg-network
+
 # =============================================================================
 # Volumes
 # =============================================================================

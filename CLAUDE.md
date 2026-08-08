@@ -34,6 +34,7 @@ tests/                   # Pytest suite (conftest.py fixtures, pipeline_tables.p
 requirements-dev.txt     # Test dependencies
 schemas/                 # API JSON schemas
 docs/                    # Architecture docs, diagrams, runbook
+  index.html             # Control panel, served by the `homepage` container on :8087
 ```
 
 ## Build and Run
