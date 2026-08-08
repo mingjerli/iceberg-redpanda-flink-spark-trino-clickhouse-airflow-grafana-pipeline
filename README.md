@@ -211,7 +211,17 @@ docker exec iceberg-airflow-scheduler airflow dags trigger iceberg_pipeline
 | MinIO Console | http://localhost:9001 | admin / admin123 |
 | Redpanda Console | http://localhost:8080 | - |
 | Trino | http://localhost:8085 | - |
-| Ingestion API | http://localhost:8090 | - |
+| ClickHouse | http://localhost:8123/play | - |
+| Iceberg REST Catalog | http://localhost:8181 | - |
+| Ingestion API | http://localhost:8090/docs | - |
+
+Every host port is overridable from `infrastructure/.env` — useful when a local
+dev server already owns one. Grafana (`EXTERNAL_GRAFANA_PORT`) and Redpanda's
+Schema Registry / HTTP Proxy / Admin API
+(`EXTERNAL_REDPANDA_SCHEMA_REGISTRY_PORT`, `EXTERNAL_REDPANDA_HTTP_PROXY_PORT`,
+`EXTERNAL_REDPANDA_ADMIN_PORT`) collide most often, since 3000/8081/8082 are
+common defaults elsewhere. Only the host side moves; container-internal
+addresses such as `redpanda:8081` are unaffected.
 
 ## Observing the Pipeline in Action
 
@@ -421,6 +431,32 @@ scheduled run.
 
 For row-count validation against a *running* stack, use
 `./scripts/validate_tables.sh` instead.
+
+### Verifying the Airflow DAG
+
+The unit suite and `reset_and_run.sh` both exercise the pipeline in **full**
+mode. The DAG runs everything in **incremental** mode, which is a genuinely
+different code path — and the one a 4-hour schedule actually uses. Verify it
+separately:
+
+```bash
+docker exec iceberg-airflow-scheduler airflow dags trigger iceberg_pipeline
+docker exec iceberg-airflow-scheduler airflow dags list-runs iceberg_pipeline
+```
+
+**Trigger it twice.** A single green run proves very little: appending duplicate
+rows is not an error, so a job can double a table and still report success. The
+real check is that a second run leaves every row count identical.
+
+```bash
+./scripts/validate_tables.sh   # before
+# ... trigger, wait for success ...
+./scripts/validate_tables.sh   # counts must match exactly
+```
+
+If a count grows on the second run, some job is reading its whole source table
+and appending the result — see the idempotency contract in
+[ARCHITECTURE.md](./ARCHITECTURE.md#the-idempotency-contract).
 
 ## Troubleshooting
 

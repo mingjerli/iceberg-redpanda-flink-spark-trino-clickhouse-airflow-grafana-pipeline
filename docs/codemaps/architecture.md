@@ -36,6 +36,7 @@ Shopify   ─┐                               raw ─> staging ─┐
 Stripe    ─┤─> FastAPI ─> Redpanda ─> Flink                ├─> semantic ─> core ─> analytics ─> marts
 HubSpot   ─┤   (HMAC)     (8 topics)  (8 jobs)             │   (entity      (unified   (metrics)  (360/
 Mailchimp ─┘                                                │    resolution)  objects)              dashboards)
+GA4 ──────────> ga4_batch_ingest.py (Parquet, no stream) ──┘
                                                             └─────────────────────────────────────────────┘
 ```
 

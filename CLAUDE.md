@@ -102,6 +102,42 @@ Airflow orchestrates batch jobs on a 4-hour schedule by default.
 - Metadata columns: `_raw_id`, `_webhook_topic`, `_loaded_at`
 - Flink jobs: `*_full.sql`
 - Spark jobs: descriptive snake_case Python files
+- **`--table` takes the registry key, not the table name.** `STAGING_FUNCTIONS`
+  is keyed `ga4_events`, so the CLI arg is `--table ga4_events` even though the
+  table is `staging.stg_ga4_events`. The `stg_` form is rejected by argparse
+  before Spark starts
+
+### Idempotency (read before adding a job)
+
+Everything reruns — Airflow retries, the 4-hour schedule, manual triggers. The
+write mode must match the read scope:
+
+| Read | Write |
+|------|-------|
+| Filtered by watermark (`_loaded_at > last`) | `append` |
+| Unfiltered, i.e. the whole source table | `createOrReplace`, or `MERGE` on the grain key |
+
+An unfiltered read plus `append` stacks a full recomputation every run and fails
+silently, because duplicate rows are not an error. This shipped: GA4 sessions
+went 308 → 616 → 924 until the marts `MERGE` finally died with
+`MERGE_CARDINALITY_VIOLATION`.
+
+Also:
+- Never `UPDATE` the watermark column in a re-ingest MERGE. Rewriting
+  `_loaded_at` pushes every row past the staging watermark, so the next
+  incremental run restages the whole table. `ga4_batch_ingest.py` is
+  insert-only for exactly this reason
+- Assert idempotency *below* the layer you changed — checking only `raw` passes
+  while everything downstream doubles
+- Verify with two consecutive runs: every row count must be identical
+
+### Shell scripts: never mask an exit code
+
+`cmd 2>&1 | tail -5 || log_warning "..."` reports **tail's** status, so the guard
+never fires and the `log_success` after it lies. Six call sites did this, which
+is why a failed entity resolution printed `✓ Entity resolution complete` while
+`entity_index`, `core.customers` and `customer_360` sat empty. Use
+`run_spark_job()` (`scripts/reset_and_run.sh:200`) or capture `${PIPESTATUS[0]}`.
 
 ### Airflow DAGs
 - `default_args` with `owner: "data-engineering"`, retries: 2, retry_delay: 5 min
