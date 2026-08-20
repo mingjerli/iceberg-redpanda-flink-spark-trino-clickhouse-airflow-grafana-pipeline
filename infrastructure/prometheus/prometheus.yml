@@ -62,6 +62,14 @@ scrape_configs:
     static_configs:
       - targets: ['ingestion-api:8000']
 
+  # Batch job metrics pushed by Spark (see jobs/spark/metrics/).
+  # honor_labels is required: without it Prometheus overwrites the pushed `job`
+  # label with "pushgateway" and every alert grouping breaks.
+  - job_name: 'pushgateway'
+    honor_labels: true
+    static_configs:
+      - targets: ['pushgateway:9091']
+
   # Trino coordinator. /metrics exists on 440 but 401s unauthenticated; Trino
   # accepts Basic with an empty password when no authenticator is configured.
   # The raw payload is ~1 MB / 3,986 series, over half of it per-optimizer-rule
