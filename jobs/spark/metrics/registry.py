@@ -90,6 +90,27 @@ PIPELINE_METRICS = (
         labels=("maintenance_job",),
         help="Wall-clock duration of the last maintenance job run",
     ),
+    # Emitted by airflow/dags/callbacks.py, which cannot import this module --
+    # it runs in the Airflow image, which has no pyspark. tests/
+    # test_pipeline_health.py cross-checks the two so they cannot drift.
+    MetricDef(
+        name="iceberg_pipeline_last_success_timestamp",
+        kind="gauge",
+        labels=("dag_id",),
+        help="Unix time the pipeline DAG last completed successfully",
+    ),
+    MetricDef(
+        name="iceberg_pipeline_last_failure_timestamp",
+        kind="gauge",
+        labels=("dag_id",),
+        help="Unix time the pipeline DAG last failed",
+    ),
+    MetricDef(
+        name="iceberg_pipeline_run_duration_seconds",
+        kind="gauge",
+        labels=("dag_id",),
+        help="Wall-clock duration of the last completed pipeline DAG run",
+    ),
 )
 
 # Metric families produced by third-party exporters we scrape directly.

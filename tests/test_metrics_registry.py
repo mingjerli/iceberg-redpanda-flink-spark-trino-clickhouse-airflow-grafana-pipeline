@@ -112,3 +112,17 @@ def test_every_alert_metric_has_a_producer():
         f"  Newly unresolved: {sorted(unresolved - set(KNOWN_GAPS))}\n"
         f"  Fixed (remove from KNOWN_GAPS): {sorted(set(KNOWN_GAPS) - unresolved)}"
     )
+
+
+def test_known_gaps_is_empty():
+    """
+    Every alert metric has a producer. If this fails, an alert was added
+    against a series nothing emits -- add the producer, do not add a gap.
+
+    KNOWN_GAPS existed to let the fix land incrementally. It is closed now, and
+    reopening it puts the pipeline back in the state this whole change set
+    exists to correct: 13 of 15 alerts reading series that were never emitted.
+    """
+    assert KNOWN_GAPS == frozenset(), (
+        f"Alerts still reference unproduced metrics: {sorted(KNOWN_GAPS)}"
+    )

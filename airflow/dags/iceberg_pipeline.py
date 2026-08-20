@@ -24,6 +24,9 @@ from airflow import DAG
 from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.standard.operators.empty import EmptyOperator
 
+# Sibling module in the dags folder, which Airflow puts on sys.path.
+from callbacks import on_pipeline_failure, on_pipeline_success
+
 
 # =============================================================================
 # Configuration
@@ -86,6 +89,11 @@ with DAG(
     tags=["iceberg", "incremental", "batch"],
     doc_md=__doc__,
     is_paused_upon_creation=False,
+    # Publish the gauges PipelineFailure, PipelineDurationHigh, and
+    # PipelineStale read. Airflow's statsd output carries no dag_id label
+    # without a hand-written mapping, so those alerts had nothing to read.
+    on_success_callback=on_pipeline_success,
+    on_failure_callback=on_pipeline_failure,
 ) as dag:
 
     # Markers
