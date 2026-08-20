@@ -8,6 +8,9 @@
 
 **Tech Stack:** Prometheus 2.48, Pushgateway 1.9, blackbox-exporter 0.25, PySpark 3.5.3, Iceberg 1.5.0 metadata tables, Airflow 3.1.6, pytest.
 
+**Status: COMPLETE.** All nine tasks shipped across PRs #6, #7, and #8.
+`KNOWN_GAPS` is empty; all 15 alerts evaluate with `health: ok`.
+
 **Spec:** This document. The audit that motivates it is in "Audit Findings" below.
 
 ## Global Constraints
@@ -1066,6 +1069,8 @@ git commit -m "feat: push Iceberg table metrics to Pushgateway"
 
 ## Task 4: Wire the export job into Airflow
 
+> **Status: DONE** -- PR 3, commit `bf38d9c`.
+
 Alerts 4, 5, 13, and 14 go live at the end of this task.
 
 **Files:**
@@ -1076,7 +1081,7 @@ Alerts 4, 5, 13, and 14 go live at the end of this task.
 - Consumes: `export_metrics.py` from Task 3
 - Produces: an `export_table_metrics` Airflow task on the tail of the DAG
 
-- [ ] **Step 1: Add the task to the DAG**
+- [x] **Step 1: Add the task to the DAG**
 
 In `airflow/dags/iceberg_pipeline.py`, after the marts task definitions and before the dependency block:
 
@@ -1105,7 +1110,7 @@ to:
     [customer_360, sales_dashboard, campaign_dashboard, ga4_engagement_dashboard] >> export_table_metrics >> end
 ```
 
-- [ ] **Step 2: Verify the DAG parses**
+- [x] **Step 2: Verify the DAG parses**
 
 ```bash
 docker exec iceberg-airflow-scheduler airflow dags list-import-errors
@@ -1113,7 +1118,7 @@ docker exec iceberg-airflow-scheduler airflow tasks list iceberg_pipeline | grep
 ```
 Expected: no import errors; `export_table_metrics` listed.
 
-- [ ] **Step 3: Add the step to reset_and_run.sh**
+- [x] **Step 3: Add the step to reset_and_run.sh**
 
 In `scripts/reset_and_run.sh`, after the marts section, using the existing helper so the exit code is not masked:
 
@@ -1122,7 +1127,7 @@ log_info "Publishing table metrics..."
 run_spark_job "export_metrics.py" "Table metrics export"
 ```
 
-- [ ] **Step 4: Run the pipeline and confirm the alerts have data**
+- [x] **Step 4: Run the pipeline and confirm the alerts have data**
 
 ```bash
 ./scripts/reset_and_run.sh --no-datagen
@@ -1131,7 +1136,7 @@ curl -s 'localhost:9090/api/v1/query?query=iceberg_table_file_count' | head -c 4
 ```
 Expected: both non-empty.
 
-- [ ] **Step 5: Confirm the alert rules evaluate**
+- [x] **Step 5: Confirm the alert rules evaluate**
 
 ```bash
 curl -s localhost:9090/api/v1/rules | python3 -c "
@@ -1144,7 +1149,7 @@ for g in json.load(sys.stdin)['data']['groups']:
 ```
 Expected: each shows `health=ok`, not `unknown`. `state=inactive` is correct — it means the rule evaluates and the condition is false.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add airflow/dags/iceberg_pipeline.py scripts/reset_and_run.sh
@@ -1154,6 +1159,8 @@ git commit -m "feat: publish table metrics at the end of each pipeline run"
 ---
 
 ## Task 5: Entity resolution metrics
+
+> **Status: DONE** -- PR 3, commit `96a73a3`.
 
 Closes alerts 6 and 7 and removes two entries from `KNOWN_GAPS`.
 
@@ -1169,7 +1176,7 @@ Closes alerts 6 and 7 and removes two entries from `KNOWN_GAPS`.
 
 Coverage is the share of a source's rows in `semantic.entity_index` carrying a non-null `entity_id`. A duplicate mapping is one `(source_system, source_id)` pair resolved to more than one `entity_id`.
 
-- [ ] **Step 1: Register the metrics and shrink the ratchet**
+- [x] **Step 1: Register the metrics and shrink the ratchet**
 
 In `jobs/spark/metrics/registry.py`, add to `PIPELINE_METRICS`:
 
@@ -1196,7 +1203,7 @@ KNOWN_GAPS: frozenset[str] = frozenset({
 })
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `tests/test_entity_metrics.py`:
 
@@ -1279,12 +1286,12 @@ def test_missing_entity_index_returns_empty(spark):
     assert collect_entity_metrics(spark) == []
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `./scripts/run_tests.sh tests/test_entity_metrics.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'metrics.entity_metrics'`
 
-- [ ] **Step 4: Write minimal implementation**
+- [x] **Step 4: Write minimal implementation**
 
 Create `jobs/spark/metrics/entity_metrics.py`:
 
@@ -1352,12 +1359,12 @@ def collect_entity_metrics(spark: SparkSession) -> list[MetricSample]:
     return samples
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `./scripts/run_tests.sh tests/test_entity_metrics.py tests/test_metrics_registry.py -v`
 Expected: all passed, including the ratchet with its shrunk `KNOWN_GAPS`.
 
-- [ ] **Step 6: Emit from the export job**
+- [x] **Step 6: Emit from the export job**
 
 In `jobs/spark/export_metrics.py`, add the import:
 
@@ -1371,7 +1378,7 @@ and inside `main()`, immediately after `samples = collect_table_metrics(spark, t
         samples.extend(collect_entity_metrics(spark))
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add jobs/spark/metrics/entity_metrics.py jobs/spark/metrics/registry.py \
@@ -1382,6 +1389,8 @@ git commit -m "feat: emit entity resolution coverage and duplicate mapping metri
 ---
 
 ## Task 6: Maintenance job metrics, and put compaction in the DAG
+
+> **Status: DONE** -- PR 3, commit `4f3b60a`.
 
 Alert 15 currently watches a job that never runs. This task schedules it, makes it observable, and moves the alert off a counter onto timestamp gauges.
 
@@ -1396,7 +1405,7 @@ Alert 15 currently watches a job that never runs. This task schedules it, makes 
 **Interfaces:**
 - Produces: `record_job_outcome(job_name: str, succeeded: bool, duration_seconds: float, gateway_url: str = DEFAULT_GATEWAY_URL) -> None`
 
-- [ ] **Step 1: Register the metrics and empty that gap**
+- [x] **Step 1: Register the metrics and empty that gap**
 
 In `registry.py`, add to `PIPELINE_METRICS`:
 
@@ -1429,7 +1438,7 @@ KNOWN_GAPS: frozenset[str] = frozenset()
 
 The label is `maintenance_job`, not `job` — `job` is the Pushgateway grouping key and would be overwritten.
 
-- [ ] **Step 2: Rewrite alert 15**
+- [x] **Step 2: Rewrite alert 15**
 
 In `monitoring/alerts/iceberg_alerts.yaml`, replace the `CompactionJobFailed` rule with:
 
@@ -1451,7 +1460,7 @@ In `monitoring/alerts/iceberg_alerts.yaml`, replace the `CompactionJobFailed` ru
           runbook_url: "https://docs/runbook#compaction-failure"
 ```
 
-- [ ] **Step 3: Write the outcome recorder**
+- [x] **Step 3: Write the outcome recorder**
 
 Create `jobs/spark/metrics/job_metrics.py`:
 
@@ -1505,7 +1514,7 @@ def record_job_outcome(
         logger.warning("Could not record outcome for %s: %s", job_name, exc)
 ```
 
-- [ ] **Step 4: Call it from compact_tables.py**
+- [x] **Step 4: Call it from compact_tables.py**
 
 `maintenance/` sits one directory deeper than `export_metrics.py`, so under
 `spark-submit` its `sys.path[0]` is `/opt/spark/jobs/maintenance` and the
@@ -1557,11 +1566,11 @@ and replace the `try/finally` inside `main()` with a timed, outcome-recording ve
         spark.stop()
 ```
 
-- [ ] **Step 5: Apply the same pattern to expire_snapshots.py**
+- [x] **Step 5: Apply the same pattern to expire_snapshots.py**
 
 Read `jobs/spark/maintenance/expire_snapshots.py` first and mirror the structure against that file's own result objects — do not paste the compaction body. Pass `"expire_snapshots"` as the job name, and include the same `sys.path.insert` bootstrap from Step 4: it is in `maintenance/` too, so the `metrics` package is equally invisible to it.
 
-- [ ] **Step 6: Schedule maintenance in the DAG**
+- [x] **Step 6: Schedule maintenance in the DAG**
 
 In `airflow/dags/iceberg_pipeline.py`, beside `export_table_metrics`:
 
@@ -1581,7 +1590,7 @@ and update the tail dependency:
 
 Compaction runs before the metrics export so file counts reflect the post-compaction state.
 
-- [ ] **Step 7: Verify**
+- [x] **Step 7: Verify**
 
 Run: `./scripts/run_tests.sh tests/test_metrics_registry.py -v`
 Expected: passes with `KNOWN_GAPS` empty.
@@ -1593,7 +1602,7 @@ curl -s localhost:9091/metrics | grep maintenance_job
 ```
 Expected: `maintenance_job_last_success_timestamp{maintenance_job="compact_tables"}` present.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add jobs/spark/metrics/job_metrics.py jobs/spark/metrics/registry.py \
@@ -1605,6 +1614,8 @@ git commit -m "feat: record maintenance job outcomes and schedule compaction"
 ---
 
 ## Task 7: Pipeline health metrics, replacing the statsd alerts
+
+> **Status: DONE** -- PR 3, commit `a7c2f72`.
 
 Alerts 1–3 are rewritten against gauges the DAG emits itself.
 
@@ -1619,7 +1630,7 @@ Alerts 1–3 are rewritten against gauges the DAG emits itself.
 
 The callback module lives under `airflow/dags/` and talks to the Pushgateway over plain `urllib`, so it needs nothing installed in the Airflow image.
 
-- [ ] **Step 1: Register the metrics**
+- [x] **Step 1: Register the metrics**
 
 In `registry.py`, add to `PIPELINE_METRICS`:
 
@@ -1644,7 +1655,7 @@ In `registry.py`, add to `PIPELINE_METRICS`:
     ),
 ```
 
-- [ ] **Step 2: Rewrite alerts 1–3**
+- [x] **Step 2: Rewrite alerts 1–3**
 
 Replace the three `pipeline_health` rules in `monitoring/alerts/iceberg_alerts.yaml`:
 
@@ -1691,7 +1702,7 @@ Replace the three `pipeline_health` rules in `monitoring/alerts/iceberg_alerts.y
 
 `PipelineDurationHigh` now describes the last *completed* run rather than one in flight. That is a deliberate narrowing: Airflow exposes no in-flight duration without the statsd mapping this plan declines to write.
 
-- [ ] **Step 3: Write the callback module**
+- [x] **Step 3: Write the callback module**
 
 Create `airflow/dags/callbacks.py`:
 
@@ -1770,7 +1781,7 @@ def on_pipeline_failure(context: dict[str, Any]) -> None:
     push_pipeline_health(context["dag"].dag_id, False, _run_duration(context))
 ```
 
-- [ ] **Step 4: Wire the callbacks into the DAG**
+- [x] **Step 4: Wire the callbacks into the DAG**
 
 In `airflow/dags/iceberg_pipeline.py`, add below the existing operator imports:
 
@@ -1785,7 +1796,7 @@ and add to the `DAG(...)` constructor arguments, after `is_paused_upon_creation=
     on_failure_callback=on_pipeline_failure,
 ```
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 ```bash
 docker exec iceberg-airflow-scheduler airflow dags list-import-errors
@@ -1798,7 +1809,7 @@ Expected: `iceberg_pipeline_last_success_timestamp{dag_id="iceberg_pipeline"}` p
 Run: `./scripts/run_tests.sh tests/test_metrics_registry.py -v`
 Expected: passes — the rewritten alerts reference registered metrics.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add airflow/dags/callbacks.py airflow/dags/iceberg_pipeline.py \
@@ -2065,12 +2076,14 @@ git commit -m "feat: add Trino, ClickHouse, and catalog-probe scrape targets"
 
 ## Task 9: Close the ratchet and document
 
+> **Status: DONE** -- PR 3, commit `a7c2f72`.
+
 **Files:**
 - Modify: `tests/test_metrics_registry.py`
 - Modify: `docs/RUNBOOK.md`
 - Modify: `CLAUDE.md`
 
-- [ ] **Step 1: Add the closing assertion**
+- [x] **Step 1: Add the closing assertion**
 
 Append to `tests/test_metrics_registry.py`:
 
@@ -2085,12 +2098,12 @@ def test_known_gaps_is_empty():
     )
 ```
 
-- [ ] **Step 2: Run the whole suite**
+- [x] **Step 2: Run the whole suite**
 
 Run: `./scripts/run_tests.sh`
 Expected: all tests pass, including the pre-existing GA4 suite.
 
-- [ ] **Step 3: Verify idempotency**
+- [x] **Step 3: Verify idempotency**
 
 Per the CLAUDE.md rule, run the pipeline twice and confirm nothing doubles. The metrics export is read-only, but the added `compact_tables` task mutates files.
 
@@ -2109,11 +2122,11 @@ print('IDENTICAL' if not diff else f'DRIFT: {diff}')
 ```
 Expected: `IDENTICAL`.
 
-- [ ] **Step 4: Add the runbook section**
+- [x] **Step 4: Add the runbook section**
 
 In `docs/RUNBOOK.md`, add a Metrics section covering: where metrics come from (Pushgateway for batch, scrape for services), how to run the export by hand, and an anchor for every `runbook_url` the alert file references — `#pipeline-failure`, `#slow-pipeline`, `#stale-pipeline`, `#ingestion-stopped`, `#staging-lag`, `#entity-coverage`, `#duplicate-entities`, `#catalog-down`, `#minio-down`, `#redpanda-down`, `#consumer-lag`, `#storage-full`, `#compaction`, `#snapshot-expiration`, `#compaction-failure`.
 
-- [ ] **Step 5: Record the rule in CLAUDE.md**
+- [x] **Step 5: Record the rule in CLAUDE.md**
 
 Under "Testing and Validation", add:
 
@@ -2130,7 +2143,7 @@ Under "Testing and Validation", add:
   Pushgateway replaces a group on push, so a pushed counter breaks `increase()`
 ```
 
-- [ ] **Step 6: Final commit**
+- [x] **Step 6: Final commit**
 
 ```bash
 git add tests/test_metrics_registry.py docs/RUNBOOK.md CLAUDE.md
