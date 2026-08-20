@@ -244,6 +244,27 @@ with DAG(
     )
 
     # -------------------------------------------------------------------------
+    # Maintenance and Observability
+    # -------------------------------------------------------------------------
+    # Both run with trigger_rule="all_done" so they still execute when an
+    # upstream layer fails -- a failed run is exactly when the row counts and
+    # the failure timestamp matter most.
+    #
+    # Compaction runs before the metrics export so the published file counts
+    # reflect the post-compaction state rather than the backlog it just cleared.
+    compact_tables = BashOperator(
+        task_id="compact_tables",
+        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/maintenance/compact_tables.py",
+        trigger_rule="all_done",
+    )
+
+    export_table_metrics = BashOperator(
+        task_id="export_table_metrics",
+        bash_command=f"{SPARK_SUBMIT} {SPARK_JOBS_PATH}/export_metrics.py",
+        trigger_rule="all_done",
+    )
+
+    # -------------------------------------------------------------------------
     # Dependencies
     # -------------------------------------------------------------------------
 
@@ -281,4 +302,5 @@ with DAG(
     [ga4_engagement_metrics, ga4_engagement_by_channel, ga4_page_performance, ga4_funnel_analysis] >> ga4_engagement_dashboard
 
     # End
-    [customer_360, sales_dashboard, campaign_dashboard, ga4_engagement_dashboard] >> end
+    [customer_360, sales_dashboard, campaign_dashboard, ga4_engagement_dashboard] >> compact_tables
+    compact_tables >> export_table_metrics >> end
