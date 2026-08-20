@@ -16,6 +16,9 @@ pytest>=7.4.0,<9.0.0
 faker>=28.0.0,<31.0.0
 python-dateutil>=2.8.2
 
+# Reads monitoring/alerts/iceberg_alerts.yaml in tests/test_metrics_registry.py
+PyYAML>=6.0
+
 # Required by tests that build Spark DataFrames from pandas
 # (spark.createDataFrame(pd.DataFrame(...)) needs pyarrow for the conversion)
 pandas>=1.5.0

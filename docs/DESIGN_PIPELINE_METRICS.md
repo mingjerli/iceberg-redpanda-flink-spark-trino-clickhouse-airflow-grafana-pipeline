@@ -12,7 +12,14 @@
 
 ## Global Constraints
 
-- Python target: 3.12 (Airflow image `apache/airflow:3.1.6-python3.12`); Spark jobs run on the Spark container's Python.
+- **Python: the Spark image is 3.8.10, the Airflow image is 3.12.** Every module
+  under `jobs/spark/` must start with `from __future__ import annotations`.
+  Without it, `list[str]` / `tuple[str, ...]` / `dict[str, str]` in an evaluated
+  annotation position raises `TypeError: 'type' object is not subscriptable` on
+  3.8 — at import time, so the job dies before it runs. Verified in the image.
+  `jobs/spark/maintenance/compact_tables.py:78` already carries this latent bug;
+  it has gone unnoticed only because the job is not in the DAG. Task 6 adds it,
+  so Task 6 must fix it.
 - **No new pip dependencies in the Spark image.** The push client uses `urllib.request` from the stdlib. Adding `prometheus_client` would require a custom Spark Dockerfile, which this plan does not introduce.
 - **Import path — read this before writing any module.** `docker-compose.yml` mounts `../jobs/spark` at `/opt/spark/jobs`, so the `spark` directory level does not exist inside the container: `jobs.spark.metrics` is importable under pytest (`run_tests.sh` sets `PYTHONPATH=/work`) but **not** under `spark-submit`. Existing jobs dodge this by never importing each other. This plan needs a shared package, so it uses one import form that resolves identically in both contexts: `from metrics.X import Y`, with `<repo>/jobs/spark` added to `sys.path` in `tests/conftest.py` (Task 1) to mirror what `/opt/spark/jobs` gives the container. The entrypoint therefore lives at `jobs/spark/export_metrics.py`, **not** inside `metrics/` — a script inside the package would put `/opt/spark/jobs/metrics` on `sys.path[0]` instead of `/opt/spark/jobs`, and the package would not resolve. Scripts one level deeper (`maintenance/*.py`) prepend the jobs root explicitly; see Task 6.
 - Tests run only via `./scripts/run_tests.sh` (Java 11 + Spark 3.5.3 live in the container). Never run pytest on the host.
