@@ -31,6 +31,7 @@ import sys
 
 from pyspark.sql import SparkSession
 
+from metrics.entity_metrics import collect_entity_metrics
 from metrics.pushgateway import (
     DEFAULT_GATEWAY_URL,
     push_samples,
@@ -96,6 +97,7 @@ def main() -> int:
     try:
         tables = list_pipeline_tables(spark, namespaces)
         samples = collect_table_metrics(spark, tables)
+        samples.extend(collect_entity_metrics(spark))
 
         if args.dry_run:
             print(render_exposition(samples))

@@ -58,6 +58,18 @@ PIPELINE_METRICS = (
         labels=("layer", "table"),
         help="Retained snapshots for an Iceberg table",
     ),
+    MetricDef(
+        name="entity_resolution_coverage_percent",
+        kind="gauge",
+        labels=("source",),
+        help="Percent of a source's entity index rows that resolved to an entity_id",
+    ),
+    MetricDef(
+        name="entity_resolution_duplicate_mappings",
+        kind="gauge",
+        labels=(),
+        help="Source-system ids mapped to more than one entity_id",
+    ),
 )
 
 # Metric families produced by third-party exporters we scrape directly.
@@ -76,8 +88,6 @@ EXTERNAL_METRIC_PREFIXES = frozenset({
 # Alert-referenced metrics that still have no producer. Shrinks task by task;
 # Task 9 asserts it is empty.
 KNOWN_GAPS = frozenset({
-    "entity_resolution_coverage_percent",
-    "entity_resolution_duplicate_mappings",
     "maintenance_job_failed_total",
 })
 
