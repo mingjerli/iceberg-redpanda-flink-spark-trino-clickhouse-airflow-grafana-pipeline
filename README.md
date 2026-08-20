@@ -210,6 +210,7 @@ docker exec iceberg-airflow-scheduler airflow dags trigger iceberg_pipeline
 | Airflow | http://localhost:8086 | admin / admin123 |
 | Grafana | http://localhost:3000 | admin / admin123 |
 | Prometheus | http://localhost:9090 | - |
+| Pushgateway | http://localhost:9091 | - |
 | Spark Master | http://localhost:8084 | - |
 | Flink Dashboard | http://localhost:8083 | - |
 | MinIO Console | http://localhost:9001 | admin / admin123 |
@@ -275,6 +276,38 @@ Open http://localhost:3000 (admin/admin123) for pre-built dashboards:
 | **Batch Business** | Customer 360, sales summary, customer metrics from marts |
 
 We should see numbers increasing in the **Streaming Business** dashboard in real time.
+
+### Metrics and Alerting
+
+Metrics reach Prometheus two ways. Long-lived services are scraped — Redpanda,
+MinIO, Trino, ClickHouse, Flink, the ingestion API. Batch Spark jobs and Airflow
+DAG runs **push** to the Pushgateway instead, because a `spark-submit` driver
+lives only for the duration of its task and cannot be scraped. The Iceberg REST
+catalog serves no `/metrics` endpoint at all, so its liveness comes from a
+blackbox probe.
+
+Every metric the pipeline emits is declared in `jobs/spark/metrics/registry.py`,
+and `tests/test_metrics_registry.py` fails if an alert rule references anything
+outside it. That guardrail exists because the alert file once shipped with 13 of
+its 15 rules pointing at series nothing produced — the monitoring read as
+configured while emitting nothing.
+
+```bash
+# Publish table, entity, and maintenance metrics by hand
+docker exec iceberg-spark-master /opt/spark/bin/spark-submit \
+  /opt/spark/jobs/export_metrics.py --dry-run   # print, don't push
+
+# Confirm every alert rule evaluates (health: ok, not unknown)
+curl -s localhost:9090/api/v1/rules | python3 -c "
+import json,sys
+for g in json.load(sys.stdin)['data']['groups']:
+    for r in g['rules']:
+        print(f\"{r['name']:28} {r['health']:8} {r.get('state')}\")
+"
+```
+
+Alert response procedures live in [docs/RUNBOOK.md](./docs/RUNBOOK.md#metrics-and-alerting);
+every alert's `runbook_url` points into it.
 
 ### Quick Health Check
 

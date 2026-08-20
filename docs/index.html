@@ -220,7 +220,7 @@
 <div class="wrap">
 
   <header class="masthead">
-    <p class="eyebrow">Local environment &middot; 20 containers</p>
+    <p class="eyebrow">Local environment &middot; 23 containers</p>
     <h1>Lakehouse<span class="dim">/</span>Control&nbsp;Panel</h1>
     <p class="lede">
       Five sources land in one Apache Iceberg lakehouse &mdash; four by webhook through Flink,
@@ -229,8 +229,8 @@
     <div class="facts">
       <span class="fact"><b>5</b><span>sources</span></span>
       <span class="fact"><b>6</b><span>layers</span></span>
-      <span class="fact"><b>20</b><span>containers</span></span>
-      <span class="fact"><b>14</b><span>service UIs</span></span>
+      <span class="fact"><b>23</b><span>containers</span></span>
+      <span class="fact"><b>15</b><span>service UIs</span></span>
     </div>
   </header>
 
@@ -434,8 +434,13 @@
           </a>
           <a class="card" href="http://localhost:9090/targets" target="_blank" rel="noopener">
             <div class="card-top"><span class="card-name">Prometheus</span><span class="card-port">:9090</span></div>
-            <p class="card-role">Scrapes Redpanda, Flink, Spark and Airflow. Opens the target health page.</p>
+            <p class="card-role">Scrapes Redpanda, MinIO, Trino, ClickHouse, Flink and the ingestion API, and probes the Iceberg catalog. Opens the target health page.</p>
             <div class="card-meta">monitoring/alerts/</div>
+          </a>
+          <a class="card" href="http://localhost:9091" target="_blank" rel="noopener">
+            <div class="card-top"><span class="card-name">Pushgateway</span><span class="card-port">:9091</span></div>
+            <p class="card-role">Spark drivers are ephemeral, so batch jobs push table, entity and maintenance metrics here rather than being scraped.</p>
+            <div class="card-meta">jobs/spark/metrics/</div>
           </a>
         </div>
 
