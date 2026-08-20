@@ -172,6 +172,29 @@ All configuration lives in `infrastructure/.env` (137 parameters). Template at `
   populates only one, because `get_all_staging_customers()` unions across all of them
 - `tests/test_ga4_e2e.py` calls the same functions the Airflow DAG invokes, so
   caller/callee signature drift fails there rather than in a scheduled run
+- **Alerts may only reference metrics with a producer.** Every metric the
+  pipeline emits is declared in `jobs/spark/metrics/registry.py`;
+  `tests/test_metrics_registry.py` fails if an alert expression names anything
+  outside that registry or `EXTERNAL_METRIC_PREFIXES`. This shipped broken: 13
+  of 15 alerts referenced series nothing produced, so freshness, compaction,
+  entity-coverage and catalog-liveness monitoring all read as configured while
+  emitting nothing. Add the producer — never widen the external prefix list to
+  silence the test
+- **Batch metrics are pushed, never scraped.** A `spark-submit` driver lives
+  only for the duration of its task. All pipeline metrics are gauges:
+  Pushgateway replaces a group on push, so a pushed counter breaks
+  `increase()`. Failure tracking compares `*_last_failure_timestamp` against
+  `*_last_success_timestamp`
+- **The Spark image is Python 3.8; the Airflow image is 3.12.** Every module
+  under `jobs/spark/` and every test file needs
+  `from __future__ import annotations` — an evaluated `list[str]` raises
+  `TypeError: 'type' object is not subscriptable` on 3.8, at import time, so
+  the job dies before it runs
+- **A Spark session needs `spark.sql.catalog.iceberg.s3.endpoint`, not just
+  `spark.hadoop.fs.s3a.endpoint`.** The catalog uses S3FileIO, so without it
+  every metadata read fails with an S3 301. `compact_tables.py` had this bug
+  and caught the exception at `debug` level, returning a file count of 0 — so
+  compaction silently skipped every table for as long as it existed
 - `scripts/validate_tables.sh` — row count validation against a running stack
 - Docker health checks on all services
 - Faker-based mock data in `datagen/` for realistic test data
