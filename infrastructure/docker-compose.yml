@@ -785,6 +785,23 @@ services:
       - iceberg-network
 
   # ===========================================================================
+  # Blackbox Exporter - Liveness Probing
+  # ===========================================================================
+  # For services with no Prometheus endpoint. The Iceberg REST catalog serves no
+  # /metrics, so a scrape job against it would sit at up=0 forever; Prometheus
+  # probes it through here instead and IcebergCatalogDown reads probe_success.
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    container_name: iceberg-blackbox-exporter
+    hostname: blackbox-exporter
+    command:
+      - '--config.file=/etc/blackbox/blackbox.yml'
+    volumes:
+      - ./prometheus/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    networks:
+      - iceberg-network
+
+  # ===========================================================================
   # Grafana - Metrics Visualization
   # ===========================================================================
   grafana:
