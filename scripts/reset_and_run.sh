@@ -694,6 +694,15 @@ run_batch_pipeline() {
             fi
         done
     fi
+
+    # Publish row, file, and snapshot counts for every layer. Runs last so the
+    # numbers describe the finished state. Read-only, and the job swallows its
+    # own errors, so this never fails the run.
+    echo ""
+    log_step "Publishing pipeline metrics..."
+    if run_spark_job "Table metrics export" /opt/spark/jobs/export_metrics.py; then
+        log_success "Metrics published"
+    fi
 }
 
 # =============================================================================

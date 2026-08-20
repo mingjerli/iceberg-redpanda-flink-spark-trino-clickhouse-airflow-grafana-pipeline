@@ -24,6 +24,12 @@ import random
 # fails only in a scheduled run, with a green suite hiding it.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "jobs" / "spark"))
 
+# airflow/dags/callbacks.py is deliberately pure stdlib -- it runs in the
+# Airflow image, which has neither pyspark nor the metrics package installed.
+# That also makes it importable here, so its logic can be tested without
+# standing up a scheduler.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "airflow" / "dags"))
+
 from tests.pipeline_tables import (
     JOB_MANAGED_TABLES,
     RAW_TABLE_DDL,

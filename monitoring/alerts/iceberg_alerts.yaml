@@ -17,33 +17,41 @@ groups:
   - name: pipeline_health
     interval: 1m
     rules:
-      # Alert when Airflow DAG fails
+      # The DAG pushes these itself via airflow/dags/callbacks.py. Airflow's
+      # statsd output carries no dag_id label without a hand-written
+      # statsd-exporter mapping, and emits nothing equivalent to a last-success
+      # timestamp at all, so the airflow_dag_* series these used to read never
+      # existed.
       - alert: PipelineFailure
-        expr: increase(airflow_dag_run_failed_total{dag_id="iceberg_pipeline"}[1h]) > 0
+        expr: |
+          iceberg_pipeline_last_failure_timestamp{dag_id="iceberg_pipeline"}
+          > iceberg_pipeline_last_success_timestamp{dag_id="iceberg_pipeline"}
         for: 0m
         labels:
           severity: critical
           team: data-engineering
         annotations:
           summary: "Iceberg pipeline failed"
-          description: "The iceberg_pipeline DAG has failed {{ $value }} times in the last hour."
+          description: "The iceberg_pipeline DAG's most recent run failed."
           runbook_url: "https://docs/runbook#pipeline-failure"
 
-      # Alert when pipeline is running too long
+      # Describes the last *completed* run, not one in flight: Airflow exposes
+      # no in-flight duration without the statsd mapping noted above.
       - alert: PipelineDurationHigh
-        expr: airflow_dag_run_duration_seconds{dag_id="iceberg_pipeline", state="running"} > 600
+        expr: iceberg_pipeline_run_duration_seconds{dag_id="iceberg_pipeline"} > 600
         for: 5m
         labels:
           severity: warning
           team: data-engineering
         annotations:
           summary: "Pipeline running longer than expected"
-          description: "Pipeline has been running for {{ $value | humanizeDuration }}. Expected < 10 minutes."
+          description: "Last run took {{ $value | humanizeDuration }}. Expected < 10 minutes."
           runbook_url: "https://docs/runbook#slow-pipeline"
 
       # Alert when pipeline hasn't run recently
       - alert: PipelineStale
-        expr: time() - airflow_dag_last_success_timestamp{dag_id="iceberg_pipeline"} > 21600
+        expr: |
+          time() - iceberg_pipeline_last_success_timestamp{dag_id="iceberg_pipeline"} > 21600
         for: 5m
         labels:
           severity: warning
@@ -225,9 +233,15 @@ groups:
           description: "Table {{ $labels.table }} has {{ $value }} snapshots. Consider running expire_snapshots."
           runbook_url: "https://docs/runbook#snapshot-expiration"
 
-      # Alert when compaction job fails
+      # Alert when compaction last failed more recently than it last succeeded.
+      # Timestamp gauges rather than a counter: Pushgateway replaces a group's
+      # samples on every push, so increase() over a pushed counter is
+      # meaningless. The label is maintenance_job because `job` is the
+      # Pushgateway grouping key and gets overwritten.
       - alert: CompactionJobFailed
-        expr: increase(maintenance_job_failed_total{job="compact_tables"}[24h]) > 0
+        expr: |
+          maintenance_job_last_failure_timestamp{maintenance_job="compact_tables"}
+          > maintenance_job_last_success_timestamp{maintenance_job="compact_tables"}
         for: 0m
         labels:
           severity: warning

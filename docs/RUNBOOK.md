@@ -10,6 +10,7 @@ This runbook provides procedures for operating and troubleshooting the Iceberg I
 - [Alert Response Procedures](#alert-response-procedures)
 - [Maintenance Procedures](#maintenance-procedures)
 - [Recovery Procedures](#recovery-procedures)
+- [Metrics and Alerting](#metrics-and-alerting)
 
 ---
 
@@ -441,6 +442,226 @@ CALL iceberg.system.rollback_to_snapshot('iceberg.staging.stg_shopify_orders', <
 ```
 
 ---
+
+---
+
+## Metrics and Alerting
+
+### Where metrics come from
+
+Two paths, and the split matters:
+
+| Source | Mechanism | Examples |
+|--------|-----------|----------|
+| Long-lived services | Prometheus **scrapes** them | Redpanda, MinIO, Trino, ClickHouse, Flink, ingestion API |
+| Batch Spark jobs | The job **pushes** to Pushgateway | `iceberg_table_*`, `entity_resolution_*`, `maintenance_job_*` |
+| Airflow DAG runs | `on_success_callback` / `on_failure_callback` push | `iceberg_pipeline_*` |
+| Iceberg REST catalog | blackbox-exporter **probes** it | `probe_success` |
+
+Spark is deliberately not a scrape target: a `spark-submit` driver lives only
+for the duration of its task, so a job pointed at a driver UI would be down more
+often than up.
+
+The catalog is deliberately probed rather than scraped: it serves no `/metrics`
+endpoint, so a scrape job would sit at `up=0` forever and fire
+`IcebergCatalogDown` permanently.
+
+### The metric registry
+
+Every metric the pipeline emits is declared in `jobs/spark/metrics/registry.py`.
+`tests/test_metrics_registry.py` fails if an alert expression names anything
+outside that registry or `EXTERNAL_METRIC_PREFIXES`.
+
+This exists because it already went wrong: 13 of 15 alerts referenced series
+nothing produced, so freshness, compaction, entity-coverage, and catalog
+liveness monitoring all read as configured while emitting nothing. **Add the
+producer — never widen the external prefix list to silence the test.**
+
+All pipeline metrics are gauges. Pushgateway replaces a group's samples on each
+push rather than accumulating them, so a pushed counter breaks `increase()`.
+Failure tracking uses `*_last_failure_timestamp` compared against
+`*_last_success_timestamp`.
+
+### Publishing metrics by hand
+
+```bash
+# Print what would be pushed, without pushing
+docker exec iceberg-spark-master /opt/spark/bin/spark-submit \
+  /opt/spark/jobs/export_metrics.py --dry-run
+
+# Publish for real
+docker exec iceberg-spark-master /opt/spark/bin/spark-submit \
+  /opt/spark/jobs/export_metrics.py
+
+# Confirm Prometheus picked them up (allow one 15s scrape interval)
+curl -s 'localhost:9090/api/v1/query?query=iceberg_table_row_count' | head -c 400
+```
+
+### Checking alert health
+
+`health: ok` means the rule evaluates. `state: inactive` means it evaluated and
+the condition was false — that is the healthy resting state, not a problem.
+`health: unknown` means the rule has not evaluated yet; the `maintenance` group
+runs on a 5-minute interval.
+
+```bash
+curl -s localhost:9090/api/v1/rules | python3 -c "
+import json,sys
+for g in json.load(sys.stdin)['data']['groups']:
+    for r in g['rules']:
+        print(f\"{r['name']:28} {r['health']:8} {r.get('state')}\")
+"
+```
+
+---
+
+## Alert Reference
+
+### catalog-down
+
+`IcebergCatalogDown` — the blackbox probe against `http://iceberg-rest:8181/v1/config`
+failed. Every Spark and Flink job that touches Iceberg will fail while this is true.
+
+```bash
+docker ps --filter name=iceberg-rest
+docker logs iceberg-rest --tail 50
+curl -s localhost:8181/v1/config | head -c 200
+docker-compose restart iceberg-rest
+```
+
+The catalog depends on `airflow-postgres` (JDBC backend) and MinIO. Check both
+before restarting.
+
+### minio-down
+
+`MinIODown` — the `minio` scrape target is down. All storage operations fail.
+
+```bash
+docker ps --filter name=iceberg-minio
+docker logs iceberg-minio --tail 50
+curl -s localhost:9000/minio/health/live -o /dev/null -w "%{http_code}\n"
+```
+
+### redpanda-down
+
+`RedpandaDown` — webhook ingestion stops; batch layers keep working from data
+already in Iceberg.
+
+```bash
+docker exec iceberg-redpanda rpk cluster health
+docker logs iceberg-redpanda --tail 50
+```
+
+### consumer-lag
+
+`KafkaConsumerLagHigh` — Flink is consuming slower than webhooks arrive, or has
+stopped. Redpanda publishes no lag metric, so the alert derives it as
+`max_offset - committed_offset`.
+
+```bash
+docker exec iceberg-redpanda rpk group list
+docker exec iceberg-redpanda rpk group describe <group>
+```
+
+Note this alert reports nothing when no consumer group exists — a stopped Flink
+eventually has its offsets expire. "Flink stopped entirely" is caught by
+`RawDataIngestionStopped`, not here.
+
+### staging-lag
+
+`StagingDataStale` — the staging layer is more than 10% behind raw. Usually a
+failed or skipped staging task.
+
+```bash
+curl -s 'localhost:9090/api/v1/query?query=iceberg_table_row_count' | head -c 600
+docker exec iceberg-airflow-scheduler airflow tasks states-for-dag-run iceberg_pipeline <run_id>
+```
+
+Re-run one staging table:
+
+```bash
+docker exec iceberg-spark-master /opt/spark/bin/spark-submit \
+  /opt/spark/jobs/staging_batch.py --table ga4_events --mode incremental
+```
+
+Remember `--table` takes the registry key (`ga4_events`), not the table name
+(`stg_ga4_events`).
+
+### stale-pipeline
+
+`PipelineStale` — no successful DAG run in 6 hours. The schedule is every 4
+hours, so this means two consecutive misses.
+
+```bash
+docker exec iceberg-airflow-scheduler airflow dags list-runs iceberg_pipeline -o plain | head
+docker exec iceberg-airflow-scheduler airflow dags list-import-errors
+```
+
+If the DAG is queued but never starts, check that the scheduler is running and
+that `max_active_runs=1` is not blocking behind an older run.
+
+### entity-coverage
+
+`EntityCoverageLow` — a source's rows in `semantic.entity_index` are resolving
+to `entity_id` less than 90% of the time. Usually means a staging source changed
+shape and the blocking keys no longer match.
+
+```bash
+docker exec iceberg-spark-master /opt/spark/bin/spark-submit \
+  /opt/spark/jobs/entity_backfill.py --mode initial --dry-run
+```
+
+### duplicate-entities
+
+`DuplicateEntityMappings` — one `(source_system, source_id)` pair resolved to
+more than one `entity_id`. Resolution has split a single identity, so joins
+against the index fan out and inflate every aggregate above it. Treat as a data
+correctness incident, not a warning.
+
+```sql
+SELECT source_system, source_id, COUNT(DISTINCT entity_id) AS entities
+FROM iceberg.semantic.entity_index
+GROUP BY source_system, source_id
+HAVING COUNT(DISTINCT entity_id) > 1;
+```
+
+### compaction
+
+`TableNeedsCompaction` — a table has more than 100 data files. Streaming
+ingestion writes one file per append, so raw tables accumulate quickly.
+
+```bash
+docker exec iceberg-spark-master /opt/spark/bin/spark-submit \
+  /opt/spark/jobs/maintenance/compact_tables.py --namespace raw
+```
+
+If compaction reports "Skipping: Only 0 files" for every table, its Spark
+session is missing `spark.sql.catalog.iceberg.s3.endpoint` — metadata reads
+fail with an S3 301 and the count comes back zero.
+
+### compaction-failure
+
+`CompactionJobFailed` — `maintenance_job_last_failure_timestamp` is newer than
+the matching success timestamp.
+
+```bash
+curl -s localhost:9091/metrics | grep maintenance_job
+docker exec iceberg-spark-master /opt/spark/bin/spark-submit \
+  /opt/spark/jobs/maintenance/compact_tables.py --namespace staging --dry-run
+```
+
+A dry run deliberately records no outcome, so it cannot clear this alert.
+
+### storage-full
+
+`MinIOStorageAlmostFull` — less than 15% of usable cluster capacity remains.
+Compaction and snapshot expiration are the first levers.
+
+```bash
+curl -s localhost:9000/minio/v2/metrics/cluster | grep capacity_usable
+docker exec iceberg-spark-master /opt/spark/bin/spark-submit \
+  /opt/spark/jobs/maintenance/expire_snapshots.py --retention-days 3 --remove-orphans
+```
 
 ## Contact Information
 
