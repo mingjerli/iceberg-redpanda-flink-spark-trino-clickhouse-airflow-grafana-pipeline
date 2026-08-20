@@ -225,9 +225,15 @@ groups:
           description: "Table {{ $labels.table }} has {{ $value }} snapshots. Consider running expire_snapshots."
           runbook_url: "https://docs/runbook#snapshot-expiration"
 
-      # Alert when compaction job fails
+      # Alert when compaction last failed more recently than it last succeeded.
+      # Timestamp gauges rather than a counter: Pushgateway replaces a group's
+      # samples on every push, so increase() over a pushed counter is
+      # meaningless. The label is maintenance_job because `job` is the
+      # Pushgateway grouping key and gets overwritten.
       - alert: CompactionJobFailed
-        expr: increase(maintenance_job_failed_total{job="compact_tables"}[24h]) > 0
+        expr: |
+          maintenance_job_last_failure_timestamp{maintenance_job="compact_tables"}
+          > maintenance_job_last_success_timestamp{maintenance_job="compact_tables"}
         for: 0m
         labels:
           severity: warning

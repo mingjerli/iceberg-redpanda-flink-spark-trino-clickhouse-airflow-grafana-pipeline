@@ -70,6 +70,26 @@ PIPELINE_METRICS = (
         labels=(),
         help="Source-system ids mapped to more than one entity_id",
     ),
+    # Label is `maintenance_job`, not `job`: `job` is the Pushgateway grouping
+    # key and would be overwritten on push.
+    MetricDef(
+        name="maintenance_job_last_success_timestamp",
+        kind="gauge",
+        labels=("maintenance_job",),
+        help="Unix time of the last successful run of a maintenance job",
+    ),
+    MetricDef(
+        name="maintenance_job_last_failure_timestamp",
+        kind="gauge",
+        labels=("maintenance_job",),
+        help="Unix time of the last failed run of a maintenance job",
+    ),
+    MetricDef(
+        name="maintenance_job_duration_seconds",
+        kind="gauge",
+        labels=("maintenance_job",),
+        help="Wall-clock duration of the last maintenance job run",
+    ),
 )
 
 # Metric families produced by third-party exporters we scrape directly.
@@ -87,9 +107,7 @@ EXTERNAL_METRIC_PREFIXES = frozenset({
 
 # Alert-referenced metrics that still have no producer. Shrinks task by task;
 # Task 9 asserts it is empty.
-KNOWN_GAPS = frozenset({
-    "maintenance_job_failed_total",
-})
+KNOWN_GAPS = frozenset()
 
 # PromQL identifiers that are never metric names.
 _PROMQL_KEYWORDS = frozenset({

@@ -24,14 +24,24 @@ Configuration:
     - MIN_FILES_TO_COMPACT: Minimum files before compaction triggers (default: 5)
 """
 
+from __future__ import annotations
+
 import argparse
 import logging
 import os
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
 from pyspark.sql import SparkSession
+
+# spark-submit puts this script's own directory on sys.path, which is one level
+# below the jobs root where the `metrics` package lives. Add the parent so the
+# same `from metrics.X import Y` form works here as in export_metrics.py.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from metrics.job_metrics import record_job_outcome  # noqa: E402
 
 # Configure logging
 logging.basicConfig(
@@ -67,6 +77,8 @@ def create_spark_session() -> SparkSession:
         .config("spark.sql.catalog.iceberg.uri", "http://iceberg-rest:8181") \
         .config("spark.sql.catalog.iceberg.warehouse", "s3a://warehouse/") \
         .config("spark.sql.catalog.iceberg.io-impl", "org.apache.iceberg.aws.s3.S3FileIO") \
+        .config("spark.sql.catalog.iceberg.s3.endpoint", "http://minio:9000") \
+        .config("spark.sql.catalog.iceberg.s3.path-style-access", "true") \
         .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000") \
         .config("spark.hadoop.fs.s3a.access.key", os.environ.get("MINIO_ROOT_USER", "admin")) \
         .config("spark.hadoop.fs.s3a.secret.key", os.environ.get("MINIO_ROOT_PASSWORD", "admin123")) \
@@ -100,7 +112,10 @@ def get_table_file_stats(spark: SparkSession, table_name: str) -> tuple[int, int
         if result:
             return result[0].file_count, result[0].total_size
     except Exception as e:
-        logger.debug(f"Could not get file stats for {table_name}: {e}")
+        # Warning, not debug: this returns (0, 0), which compact_table reads as
+        # "fewer than MIN_FILES_TO_COMPACT files" and silently skips the table.
+        # A misconfigured catalog therefore looks exactly like a tidy one.
+        logger.warning(f"Could not get file stats for {table_name}: {e}")
     return 0, 0
 
 
@@ -231,6 +246,8 @@ def main():
     logger.info("Starting Iceberg table compaction")
     spark = create_spark_session()
 
+    start = datetime.now()
+    succeeded = False
     try:
         if args.table:
             # Compact specific table
@@ -251,8 +268,17 @@ def main():
             results.append(result)
 
         print_summary(results)
+        succeeded = not any(r.status == "failed" for r in results)
 
     finally:
+        # A dry run reports nothing: it did not attempt the work, so recording
+        # a success would let CompactionJobFailed clear on a no-op.
+        if not args.dry_run:
+            record_job_outcome(
+                "compact_tables",
+                succeeded,
+                (datetime.now() - start).total_seconds(),
+            )
         spark.stop()
 
 
