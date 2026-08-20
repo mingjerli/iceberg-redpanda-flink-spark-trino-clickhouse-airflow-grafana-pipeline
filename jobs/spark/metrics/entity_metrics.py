@@ -6,10 +6,17 @@ Turns the semantic.entity_index into the gauges EntityCoverageLow and
 DuplicateEntityMappings read.
 
 Coverage is per source: the share of that source's rows in the index carrying a
-non-null entity_id. A duplicate mapping is one (source_system, source_id) pair
-resolved to more than one entity_id, which means resolution has split a single
+non-null unified_id. A duplicate mapping is one (source, source_id) pair
+resolved to more than one unified_id, which means resolution has split a single
 identity -- downstream joins against it will fan out and inflate every
 aggregate built on top.
+
+Column names follow semantic.entity_index as declared in
+tests/pipeline_tables.py and written by jobs/spark/entity_backfill.py:
+`unified_id` and `source`. They are not `entity_id` and `source_system`; an
+earlier revision of this module guessed those and returned nothing at all,
+which the tests missed because their fixture invented a matching schema rather
+than using the real DDL.
 
 A missing or unreadable index is logged and skipped: a metrics collector must
 never be the reason a pipeline run fails.
@@ -32,19 +39,19 @@ def collect_entity_metrics(spark: SparkSession) -> list:
     try:
         coverage_rows = spark.sql("""
             SELECT
-                source_system,
+                source,
                 COUNT(*) AS total,
-                SUM(CASE WHEN entity_id IS NOT NULL THEN 1 ELSE 0 END) AS resolved
+                SUM(CASE WHEN unified_id IS NOT NULL THEN 1 ELSE 0 END) AS resolved
             FROM {}
-            GROUP BY source_system
+            GROUP BY source
         """.format(ENTITY_INDEX)).collect()
 
         duplicate_row = spark.sql("""
             SELECT COUNT(*) AS duplicates FROM (
-                SELECT source_system, source_id
+                SELECT source, source_id
                 FROM {}
-                GROUP BY source_system, source_id
-                HAVING COUNT(DISTINCT entity_id) > 1
+                GROUP BY source, source_id
+                HAVING COUNT(DISTINCT unified_id) > 1
             )
         """.format(ENTITY_INDEX)).collect()[0]
     except Exception as exc:
@@ -54,7 +61,7 @@ def collect_entity_metrics(spark: SparkSession) -> list:
     samples = [
         MetricSample(
             "entity_resolution_coverage_percent",
-            {"source": row.source_system},
+            {"source": row.source},
             100.0 * row.resolved / row.total if row.total else 0.0,
         )
         for row in coverage_rows
