@@ -785,6 +785,32 @@ services:
       - iceberg-network
 
   # ===========================================================================
+  # Pushgateway - Batch Job Metrics
+  # ===========================================================================
+  # Spark drivers are ephemeral -- a spark-submit driver lives only for the
+  # duration of its task -- so batch jobs push here instead of being scraped.
+  # Prometheus scrapes this with honor_labels so pushed labels survive.
+  pushgateway:
+    image: prom/pushgateway:v1.9.0
+    container_name: iceberg-pushgateway
+    hostname: pushgateway
+    ports:
+      - "${EXTERNAL_PUSHGATEWAY_PORT:-9091}:9091"
+    command:
+      - '--web.listen-address=:9091'
+      - '--persistence.file=/data/pushgateway.store'
+      - '--persistence.interval=5m'
+    volumes:
+      - pushgateway-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9091/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - iceberg-network
+
+  # ===========================================================================
   # Blackbox Exporter - Liveness Probing
   # ===========================================================================
   # For services with no Prometheus endpoint. The Iceberg REST catalog serves no
@@ -876,6 +902,8 @@ volumes:
     name: iceberg-demo-airflow-postgres-data
   prometheus-data:
     name: iceberg-demo-prometheus-data
+  pushgateway-data:
+    name: iceberg-demo-pushgateway-data
   grafana-data:
     name: iceberg-demo-grafana-data
 

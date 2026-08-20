@@ -9,11 +9,20 @@ Provides:
 """
 import pytest
 import os
+import sys
 import tempfile
 import shutil
 from datetime import datetime, timedelta
+from pathlib import Path
 from pyspark.sql import SparkSession
 import random
+
+# docker-compose mounts ../jobs/spark at /opt/spark/jobs, so the `spark` level
+# does not exist inside the container and `metrics` is a top-level package
+# there. Mirror that here so tests and spark-submit use the identical
+# `from metrics.X import Y` form -- otherwise an import that works under pytest
+# fails only in a scheduled run, with a green suite hiding it.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "jobs" / "spark"))
 
 from tests.pipeline_tables import (
     JOB_MANAGED_TABLES,

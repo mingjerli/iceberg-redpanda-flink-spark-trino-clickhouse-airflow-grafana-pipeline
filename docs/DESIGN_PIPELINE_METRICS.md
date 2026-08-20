@@ -12,7 +12,14 @@
 
 ## Global Constraints
 
-- Python target: 3.12 (Airflow image `apache/airflow:3.1.6-python3.12`); Spark jobs run on the Spark container's Python.
+- **Python: the Spark image is 3.8.10, the Airflow image is 3.12.** Every module
+  under `jobs/spark/` must start with `from __future__ import annotations`.
+  Without it, `list[str]` / `tuple[str, ...]` / `dict[str, str]` in an evaluated
+  annotation position raises `TypeError: 'type' object is not subscriptable` on
+  3.8 — at import time, so the job dies before it runs. Verified in the image.
+  `jobs/spark/maintenance/compact_tables.py:78` already carries this latent bug;
+  it has gone unnoticed only because the job is not in the DAG. Task 6 adds it,
+  so Task 6 must fix it.
 - **No new pip dependencies in the Spark image.** The push client uses `urllib.request` from the stdlib. Adding `prometheus_client` would require a custom Spark Dockerfile, which this plan does not introduce.
 - **Import path — read this before writing any module.** `docker-compose.yml` mounts `../jobs/spark` at `/opt/spark/jobs`, so the `spark` directory level does not exist inside the container: `jobs.spark.metrics` is importable under pytest (`run_tests.sh` sets `PYTHONPATH=/work`) but **not** under `spark-submit`. Existing jobs dodge this by never importing each other. This plan needs a shared package, so it uses one import form that resolves identically in both contexts: `from metrics.X import Y`, with `<repo>/jobs/spark` added to `sys.path` in `tests/conftest.py` (Task 1) to mirror what `/opt/spark/jobs` gives the container. The entrypoint therefore lives at `jobs/spark/export_metrics.py`, **not** inside `metrics/` — a script inside the package would put `/opt/spark/jobs/metrics` on `sys.path[0]` instead of `/opt/spark/jobs`, and the package would not resolve. Scripts one level deeper (`maintenance/*.py`) prepend the jobs root explicitly; see Task 6.
 - Tests run only via `./scripts/run_tests.sh` (Java 11 + Spark 3.5.3 live in the container). Never run pytest on the host.
@@ -126,6 +133,8 @@ Task 7 Step 5).
 
 ## Task 1: Metric registry and the alert-coverage ratchet
 
+> **Status: DONE** -- PR 2, commit `6810747`.
+
 Establishes the contract before anything emits. The ratchet starts loose (`KNOWN_GAPS` lists the metrics with no producer) and every later task removes entries from it.
 
 **Files:**
@@ -146,7 +155,7 @@ Establishes the contract before anything emits. The ratchet starts loose (`KNOWN
   - `is_external(name: str) -> bool`
   - `extract_metric_names(expr: str) -> set[str]`
 
-- [ ] **Step 1: Make the metrics package importable the same way the container sees it**
+- [x] **Step 1: Make the metrics package importable the same way the container sees it**
 
 `spark-submit` puts the script's own directory on `sys.path`, so a job at
 `/opt/spark/jobs/export_metrics.py` resolves `import metrics.registry` against
@@ -172,7 +181,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "jobs" / "spark"))
 This is additive — `/work` stays on the path, so the existing
 `from jobs.spark.staging_batch import ...` imports in the GA4 tests keep working.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `tests/test_metrics_registry.py`:
 
@@ -260,14 +269,14 @@ def test_every_alert_metric_has_a_producer():
     )
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `./scripts/run_tests.sh tests/test_metrics_registry.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'metrics'`
 
 If it instead fails on `import yaml`, add `PyYAML>=6.0` to `requirements-dev.txt` and re-run.
 
-- [ ] **Step 4: Write minimal implementation**
+- [x] **Step 4: Write minimal implementation**
 
 Create `jobs/spark/metrics/__init__.py`:
 
@@ -399,14 +408,14 @@ def is_external(name: str) -> bool:
 
 `KNOWN_GAPS` deliberately omits `iceberg_table_*` even though nothing emits them yet — Task 2 lands the producer and `PIPELINE_METRICS` already declares them, so the registry is self-consistent from the start. It also omits `airflow_dag_*`, which match an external prefix; Task 7 rewrites those alerts and the ratchet will pick up the replacement names.
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `./scripts/run_tests.sh tests/test_metrics_registry.py -v`
 Expected: 7 passed.
 
 If `test_every_alert_metric_has_a_producer` fails, the assertion message names exactly which metrics to add to or remove from `KNOWN_GAPS`. Do not widen `EXTERNAL_METRIC_PREFIXES` to make it pass — that is the failure mode this test exists to prevent.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add jobs/spark/metrics/__init__.py jobs/spark/metrics/registry.py \
@@ -417,6 +426,8 @@ git commit -m "feat: add pipeline metric registry with alert-coverage ratchet"
 ---
 
 ## Task 2: Iceberg table metrics from metadata
+
+> **Status: DONE** -- PR 2, commit `4a5056b`.
 
 **Files:**
 - Create: `jobs/spark/metrics/table_metrics.py`
@@ -432,7 +443,7 @@ git commit -m "feat: add pipeline metric registry with alert-coverage ratchet"
 
 Row counts come from `SUM(record_count)` on the `.files` metadata table, not `COUNT(*)` on the table. Metadata-only, so cost stays flat as volume grows.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_table_metrics.py`:
 
@@ -518,12 +529,12 @@ def test_list_pipeline_tables_finds_created_table(spark, metrics_table):
     assert "iceberg.raw.metrics_probe" in tables
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `./scripts/run_tests.sh tests/test_table_metrics.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'metrics.table_metrics'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `jobs/spark/metrics/table_metrics.py`:
 
@@ -623,12 +634,12 @@ def collect_table_metrics(
     return samples
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `./scripts/run_tests.sh tests/test_table_metrics.py -v`
 Expected: 8 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add jobs/spark/metrics/table_metrics.py tests/test_table_metrics.py
@@ -638,6 +649,8 @@ git commit -m "feat: collect Iceberg row, file, and snapshot metrics from metada
 ---
 
 ## Task 3: Pushgateway transport and the export job
+
+> **Status: DONE** -- PR 2, commit `8283c77`.
 
 **Files:**
 - Create: `jobs/spark/metrics/pushgateway.py`
@@ -659,7 +672,7 @@ Two details that bite:
 1. The exposition body **must end with a newline**. Pushgateway returns 400 without it.
 2. The scrape job needs `honor_labels: true`, or Prometheus overwrites the pushed `job` label with `pushgateway` and every alert grouping breaks.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_pushgateway.py`:
 
@@ -723,12 +736,12 @@ def test_render_empty_samples_returns_empty_string():
     assert render_exposition([]) == ""
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `./scripts/run_tests.sh tests/test_pushgateway.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'metrics.pushgateway'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `jobs/spark/metrics/pushgateway.py`:
 
@@ -952,12 +965,12 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `./scripts/run_tests.sh tests/test_pushgateway.py -v`
 Expected: 7 passed.
 
-- [ ] **Step 5: Add the Pushgateway service**
+- [x] **Step 5: Add the Pushgateway service**
 
 In `infrastructure/docker-compose.yml`, add after the `statsd-exporter` block (around line 788):
 
@@ -995,7 +1008,7 @@ In the `volumes:` block at the bottom (near line 860), add:
     name: iceberg-demo-pushgateway-data
 ```
 
-- [ ] **Step 6: Add the scrape job**
+- [x] **Step 6: Add the scrape job**
 
 Append to `scrape_configs` in `infrastructure/prometheus/prometheus.yml`:
 
@@ -1009,7 +1022,7 @@ Append to `scrape_configs` in `infrastructure/prometheus/prometheus.yml`:
       - targets: ['pushgateway:9091']
 ```
 
-- [ ] **Step 7: Add env vars**
+- [x] **Step 7: Add env vars**
 
 In `infrastructure/.env.example`, near the other port definitions:
 
@@ -1019,7 +1032,7 @@ EXTERNAL_PUSHGATEWAY_PORT=9091
 PUSHGATEWAY_URL=http://pushgateway:9091
 ```
 
-- [ ] **Step 8: Verify end to end against the running stack**
+- [x] **Step 8: Verify end to end against the running stack**
 
 ```bash
 cd infrastructure && docker-compose up -d pushgateway prometheus
@@ -1040,7 +1053,7 @@ curl -s 'localhost:9090/api/v1/query?query=iceberg_table_row_count' | head -c 40
 ```
 Expected: non-empty `result` array. If empty, wait one scrape interval (15s) and retry.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add jobs/spark/metrics/pushgateway.py jobs/spark/export_metrics.py \
