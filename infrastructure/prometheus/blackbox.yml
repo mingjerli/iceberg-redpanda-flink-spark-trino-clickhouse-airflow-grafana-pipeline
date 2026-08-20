@@ -1,0 +1,18 @@
+# =============================================================================
+# Blackbox Exporter Modules
+# =============================================================================
+# Liveness probing for services that expose no Prometheus metrics endpoint.
+#
+# The Iceberg REST catalog is the reason this exists: it serves no /metrics, so
+# a normal scrape job against it would report up=0 forever and make the
+# IcebergCatalogDown alert fire permanently. Probing an endpoint it does serve
+# gives a real liveness signal instead.
+# =============================================================================
+
+modules:
+  http_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      valid_status_codes: [200]
+      preferred_ip_protocol: ip4

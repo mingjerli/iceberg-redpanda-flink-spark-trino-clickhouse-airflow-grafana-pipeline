@@ -115,9 +115,12 @@ groups:
   - name: infrastructure
     interval: 30s
     rules:
-      # Alert when Iceberg REST catalog is down
+      # Alert when Iceberg REST catalog is down.
+      # The catalog serves no /metrics endpoint, so there is no `up` series to
+      # read: a scrape job pointed at it would sit at 0 forever and fire this
+      # alert permanently. Liveness comes from a blackbox probe instead.
       - alert: IcebergCatalogDown
-        expr: up{job="iceberg-rest"} == 0
+        expr: probe_success{job="blackbox-iceberg-rest"} == 0
         for: 1m
         labels:
           severity: critical
@@ -151,30 +154,45 @@ groups:
           description: "Redpanda message queue is unreachable. Webhook ingestion will fail."
           runbook_url: "https://docs/runbook#redpanda-down"
 
-      # Alert when Kafka consumer lag is high
+      # Alert when Kafka consumer lag is high.
+      # Redpanda v24.1.1 exposes no consumer-group lag metric under any name, so
+      # derive it: lag = max_offset - committed_offset per (group, topic,
+      # partition). `rpk group describe` confirms these map exactly to
+      # LOG-END-OFFSET and CURRENT-OFFSET, so there is no off-by-one.
+      # group_right because one partition's max_offset fans out across every
+      # consumer group reading it. The namespace filter excludes Redpanda's
+      # internal `controller` topic.
       - alert: KafkaConsumerLagHigh
-        expr: redpanda_kafka_consumer_group_lag > 10000
+        expr: |
+          sum by (redpanda_group, redpanda_topic) (
+            redpanda_kafka_max_offset{redpanda_namespace="kafka"}
+            - on (redpanda_topic, redpanda_partition) group_right
+            redpanda_kafka_consumer_group_committed_offset
+          ) > 10000
         for: 10m
         labels:
           severity: warning
           team: data-engineering
         annotations:
           summary: "Kafka consumer lag is high"
-          description: "Consumer group for {{ $labels.topic }} has {{ $value }} messages lag."
+          description: "Consumer group {{ $labels.redpanda_group }} on {{ $labels.redpanda_topic }} has {{ $value }} messages lag."
           runbook_url: "https://docs/runbook#consumer-lag"
 
-      # Alert when MinIO storage is almost full
+      # Alert when MinIO storage is almost full.
+      # No bucket quota is configured, so minio_bucket_quota_bytes is never
+      # emitted and the original ratio could not resolve. Cluster free capacity
+      # is the signal that actually matters here.
       - alert: MinIOStorageAlmostFull
         expr: |
-          minio_bucket_usage_total_bytes{bucket="warehouse"}
-          / minio_bucket_quota_bytes{bucket="warehouse"} > 0.85
+          minio_cluster_capacity_usable_free_bytes
+          / minio_cluster_capacity_usable_total_bytes < 0.15
         for: 5m
         labels:
           severity: warning
           team: platform
         annotations:
           summary: "MinIO storage almost full"
-          description: "Warehouse bucket is {{ $value | humanizePercentage }} full."
+          description: "Only {{ $value | humanizePercentage }} of usable cluster capacity remains."
           runbook_url: "https://docs/runbook#storage-full"
 
   # ===========================================================================

@@ -78,4 +78,14 @@ This extends the default configuration with S3/MinIO access.
 
     <!-- Format settings -->
     <format_schema_path>/var/lib/clickhouse/format_schemas/</format_schema_path>
+
+    <!-- Prometheus metrics endpoint, scraped as job "clickhouse".
+         Without this block nothing binds 9363 and the scrape job sits at up=0. -->
+    <prometheus>
+        <endpoint>/metrics</endpoint>
+        <port>9363</port>
+        <metrics>true</metrics>
+        <events>true</events>
+        <asynchronous_metrics>true</asynchronous_metrics>
+    </prometheus>
 </clickhouse>
