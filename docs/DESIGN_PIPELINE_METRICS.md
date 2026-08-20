@@ -1797,6 +1797,9 @@ git commit -m "feat: emit pipeline health gauges from the DAG"
 
 ## Task 8: Scrape targets and external metric corrections
 
+> **Status: DONE** — shipped as PR 1 on `fix/prometheus-scrape-targets-and-alerts` (commit `4c0ff21`).
+> Verified on the running stack: 4/4 new targets up, 15/15 rules healthy, lag expression cross-checked against `rpk`.
+
 Closes alerts 8, 11, and 12. Nothing here touches the registry — these are all `EXTERNAL_METRIC_PREFIXES` families, and every endpoint fact was verified against the running stack (Step 1).
 
 **Files:**
@@ -1806,7 +1809,7 @@ Closes alerts 8, 11, and 12. Nothing here touches the registry — these are all
 - Modify: `infrastructure/clickhouse/config.xml`
 - Modify: `monitoring/alerts/iceberg_alerts.yaml`
 
-- [ ] **Step 1: Confirm the endpoint facts (already resolved — this is a re-check, not a discovery)**
+- [x] **Step 1: Confirm the endpoint facts (already resolved — this is a re-check, not a discovery)**
 
 These were resolved against the running stack on 2026-08-20 before the plan was
 finalised. The configs in Steps 3–5 already encode the answers. Re-run these only
@@ -1841,7 +1844,7 @@ The labels are `redpanda_topic`, `redpanda_partition`, `redpanda_group`, and
 The join was validated against the live Prometheus and returned 8 series, one per
 consumer group, matching `rpk`'s per-group lag.
 
-- [ ] **Step 2: Add blackbox-exporter for the REST catalog**
+- [x] **Step 2: Add blackbox-exporter for the REST catalog**
 
 The Iceberg REST catalog image serves no `/metrics`, so a scrape job would report `up=0` forever and make alert 8 fire constantly. A blackbox HTTP probe is the correct liveness signal.
 
@@ -1878,7 +1881,7 @@ In `infrastructure/docker-compose.yml`, beside the pushgateway service:
       - iceberg-network
 ```
 
-- [ ] **Step 3: Add the scrape jobs**
+- [x] **Step 3: Add the scrape jobs**
 
 Append to `scrape_configs` in `infrastructure/prometheus/prometheus.yml`:
 
@@ -1929,7 +1932,7 @@ Append to `scrape_configs` in `infrastructure/prometheus/prometheus.yml`:
 
 Spark is deliberately absent. Its drivers are ephemeral; its metrics arrive via the Pushgateway from Task 3.
 
-- [ ] **Step 4: Enable ClickHouse metrics**
+- [x] **Step 4: Enable ClickHouse metrics**
 
 In `infrastructure/clickhouse/config.xml`, insert before the closing `</clickhouse>` on line 81:
 
@@ -1944,7 +1947,7 @@ In `infrastructure/clickhouse/config.xml`, insert before the closing `</clickhou
     </prometheus>
 ```
 
-- [ ] **Step 5: Rewrite alerts 8, 11, and 12**
+- [x] **Step 5: Rewrite alerts 8, 11, and 12**
 
 `IcebergCatalogDown`:
 
@@ -2011,7 +2014,7 @@ original annotation referenced a label that does not exist on any Redpanda serie
           runbook_url: "https://docs/runbook#storage-full"
 ```
 
-- [ ] **Step 6: Verify every target is up**
+- [x] **Step 6: Verify every target is up**
 
 ```bash
 cd infrastructure && docker-compose up -d
@@ -2024,7 +2027,7 @@ for t in json.load(sys.stdin)['data']['activeTargets']:
 ```
 Expected: every job `up`. A `down` target means the endpoint does not exist on this image version or the port is wrong — fix or remove the job rather than leaving it down.
 
-- [ ] **Step 7: Confirm no rule is unhealthy**
+- [x] **Step 7: Confirm no rule is unhealthy**
 
 ```bash
 curl -s localhost:9090/api/v1/rules | python3 -c "
@@ -2036,7 +2039,7 @@ for g in json.load(sys.stdin)['data']['groups']:
 ```
 Expected: all 15 rules `ok`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add infrastructure/prometheus/blackbox.yml infrastructure/prometheus/prometheus.yml \
