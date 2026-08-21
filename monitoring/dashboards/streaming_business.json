@@ -412,7 +412,7 @@
         "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
         "format": 1,
         "queryType": "sql",
-        "rawSql": "SELECT id, email, total_price, financial_status, created_at FROM iceberg.raw_shopify_orders ORDER BY created_at DESC LIMIT 20",
+        "rawSql": "SELECT order_id, total_price, financial_status, created_at FROM iceberg.stg_shopify_orders ORDER BY created_at DESC LIMIT 20",
         "refId": "A"
       }],
       "title": "Recent Orders",
@@ -443,7 +443,7 @@
         "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
         "format": 1,
         "queryType": "sql",
-        "rawSql": "SELECT id, amount / 100.0 as amount, currency, status, receipt_email, created FROM iceberg.raw_stripe_charges ORDER BY created DESC LIMIT 20",
+        "rawSql": "SELECT charge_id, amount, currency, status, billing_email_token, created_at FROM iceberg.stg_stripe_charges ORDER BY created_at DESC LIMIT 20",
         "refId": "A"
       }],
       "title": "Recent Payments",

@@ -8,6 +8,8 @@
 CREATE TABLE IF NOT EXISTS core.orders (
     order_id                    STRING          COMMENT 'Unique order identifier',
     customer_id                 STRING          COMMENT 'Unified customer ID (from entity_index)',
+    customer_email_token        STRING          COMMENT 'Tokenized order contact email (pii/registry.py class: email)',
+    customer_phone_token        STRING          COMMENT 'Tokenized order contact phone (class: phone)',
     source                      STRING          COMMENT 'Source system: shopify',
 
     -- Order details

@@ -333,6 +333,13 @@ services:
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-admin123}
       AWS_REGION: us-east-1
+      # jobs/spark/staging_batch.py reads this directly via os.environ.get, not
+      # a Spark --conf, so it must live in this container's own environment.
+      # spark-submit runs here via `docker exec iceberg-spark-master ...`
+      # (--deploy-mode client), and a docker exec session inherits the target
+      # container's environment regardless of which process issued the exec,
+      # so this is the one place that has to carry the value.
+      PII_TOKEN_PEPPER: ${PII_TOKEN_PEPPER:-}
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     volumes:
       - ../jobs/spark:/opt/spark/jobs:ro

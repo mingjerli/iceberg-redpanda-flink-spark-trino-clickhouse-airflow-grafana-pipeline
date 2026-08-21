@@ -16,9 +16,9 @@ CREATE TABLE IF NOT EXISTS staging.stg_mailchimp_events (
     -- Event identification
     event_id                        STRING          COMMENT 'Unique event ID',
     campaign_id                     STRING          COMMENT 'Associated campaign ID',
-    email_id                        STRING          COMMENT 'Unique member-campaign combination ID',
-    email_address                   STRING          COMMENT 'Subscriber email address (PII)',
-    email_normalized                STRING          COMMENT 'Lowercased trimmed email for matching',
+    email_id_token                  STRING          COMMENT 'Tokenized unique member-campaign combination ID (pii/registry.py class: mailchimp_id)',
+    email_address_token             STRING          COMMENT 'Tokenized subscriber email address (class: email)',
+    email_normalized_token          STRING          COMMENT 'Tokenized normalized email, for matching (class: email)',
 
     -- Event details
     action                          STRING          COMMENT 'Event action: sent, open, click, bounce, unsub, abuse, sms_sent, sms_click',

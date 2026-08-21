@@ -11,21 +11,29 @@
 
 CREATE TABLE IF NOT EXISTS staging.stg_mailchimp_subscribers (
     -- Raw ID
-    _raw_id                         STRING          COMMENT 'Raw record identifier (subscriber_id)',
+    -- Set from subscriber_id_token, NOT the raw MD5(lower(email)) hash.
+    -- subscriber_id is itself unsalted, publicly-reproducible PII
+    -- (pii/registry.py class: mailchimp_id), so leaving _raw_id as the
+    -- plaintext hash would defeat the tokenization on the very next column.
+    -- Lineage back to raw.mailchimp_subscribers is not lost: semantic.pii_vault
+    -- maps the token back to that same MD5, and raw's own `id` *is* that MD5,
+    -- so a privileged detokenize() call can still join staging to raw.
+    _raw_id                         STRING          COMMENT 'subscriber_id_token -- see comment above',
 
     -- Subscriber identification
-    subscriber_id                   STRING          COMMENT 'MD5 hash of lowercased email (Mailchimp convention)',
-    email_address                   STRING          COMMENT 'Subscriber email address (PII)',
-    email_normalized                STRING          COMMENT 'Lowercased trimmed email for entity resolution',
+    subscriber_id_token             STRING          COMMENT 'Tokenized MD5(lower(email)) subscriber id (pii/registry.py class: mailchimp_id)',
+    email_address_token             STRING          COMMENT 'Tokenized subscriber email (class: email)',
+    email_normalized_token          STRING          COMMENT 'Tokenized normalized email, for entity resolution (class: email)',
     email_type                      STRING          COMMENT 'Preferred email format: html, text',
     status                          STRING          COMMENT 'Subscription status: subscribed, unsubscribed, cleaned, pending, transactional',
 
     -- Profile data (extracted from merge_fields JSON)
-    first_name                      STRING          COMMENT 'First name (from merge_fields.FNAME, PII)',
-    last_name                       STRING          COMMENT 'Last name (from merge_fields.LNAME, PII)',
-    full_name                       STRING          COMMENT 'Concatenated first + last name (for entity resolution)',
-    phone                           STRING          COMMENT 'Phone number in E.164 format (PII)',
-    phone_normalized                STRING          COMMENT 'Digits-only phone for entity resolution matching',
+    first_name_token                STRING          COMMENT 'Tokenized first name, from merge_fields.FNAME (class: name)',
+    last_name_token                 STRING          COMMENT 'Tokenized last name, from merge_fields.LNAME (class: name)',
+    full_name_token                 STRING          COMMENT 'Tokenized concatenated first + last name (class: name)',
+    last_name_prefix_token          STRING          COMMENT 'Tokenized 3-char last-name prefix, for name_zip blocking (class: name_prefix)',
+    phone_token                     STRING          COMMENT 'Tokenized phone in E.164 format (class: phone)',
+    phone_normalized_token          STRING          COMMENT 'Tokenized digits-only phone for entity resolution matching (class: phone)',
 
     -- Raw JSON fields (preserved for downstream flexibility)
     merge_fields                    STRING          COMMENT 'All merge fields as JSON',

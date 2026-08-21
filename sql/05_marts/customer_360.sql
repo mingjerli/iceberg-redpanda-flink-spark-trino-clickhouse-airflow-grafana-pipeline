@@ -6,13 +6,13 @@
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS marts.customer_360 (
-    -- Identity
+    -- Identity (tokenized -- pii/registry.py)
     customer_id                 STRING          COMMENT 'Unified customer ID',
-    email                       STRING          COMMENT 'Primary email',
-    phone                       STRING          COMMENT 'Primary phone',
-    full_name                   STRING          COMMENT 'Full name',
-    first_name                  STRING          COMMENT 'First name',
-    last_name                   STRING          COMMENT 'Last name',
+    email_token                 STRING          COMMENT 'Tokenized primary email',
+    phone_token                 STRING          COMMENT 'Tokenized primary phone',
+    full_name_token             STRING          COMMENT 'Tokenized full name',
+    first_name_token            STRING          COMMENT 'Tokenized first name',
+    last_name_token             STRING          COMMENT 'Tokenized last name',
 
     -- Location
     city                        STRING          COMMENT 'City',
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS marts.customer_360 (
     shopify_customer_id         BIGINT          COMMENT 'Shopify ID',
     stripe_customer_id          STRING          COMMENT 'Stripe ID',
     hubspot_contact_id          STRING          COMMENT 'HubSpot ID',
-    mailchimp_subscriber_id     STRING          COMMENT 'Mailchimp subscriber ID',
+    mailchimp_subscriber_id_token STRING        COMMENT 'Tokenized Mailchimp subscriber ID (pii/registry.py class: mailchimp_id)',
 
     -- Mailchimp engagement
     mailchimp_status            STRING          COMMENT 'Mailchimp subscription status',

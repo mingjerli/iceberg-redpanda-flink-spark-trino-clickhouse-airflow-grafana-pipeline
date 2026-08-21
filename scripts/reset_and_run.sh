@@ -60,6 +60,27 @@ set -a  # automatically export all variables
 source "$ENV_FILE"
 set +a
 
+# jobs/spark/staging_batch.py reads PII_TOKEN_PEPPER via os.environ.get at
+# import time and every staging function calls tokenize_frame(), which
+# raises immediately if the pepper is empty -- even for tables with no
+# registered PII columns. Fail here, before starting any infrastructure,
+# rather than 5+ minutes into Phase 5 on the first staging job's stack trace.
+# `set -a` above already exports PII_TOKEN_PEPPER into this script's own
+# environment; docker-compose.yml separately declares it on spark-master's
+# environment (read from this same $ENV_FILE), which is what actually
+# reaches spark-submit, since `docker exec` inherits the target container's
+# environment, not the caller's.
+if [ -z "${PII_TOKEN_PEPPER:-}" ]; then
+    echo "ERROR: PII_TOKEN_PEPPER is not set in $ENV_FILE."
+    echo "  Generate one with: openssl rand -hex 32"
+    echo "  Then set PII_TOKEN_PEPPER=<value> in $ENV_FILE and re-run."
+    exit 1
+elif [ "$PII_TOKEN_PEPPER" = "change-me-generate-with-openssl-rand-hex-32" ]; then
+    echo "WARNING: PII_TOKEN_PEPPER in $ENV_FILE is still the placeholder from .env.example."
+    echo "  The demo will run, but every token is derived from a publicly known pepper."
+    echo "  Generate a real one with: openssl rand -hex 32"
+fi
+
 # Data generation settings
 SHOPIFY_CUSTOMERS=${SHOPIFY_CUSTOMERS:-50}
 SHOPIFY_ORDERS=${SHOPIFY_ORDERS:-100}

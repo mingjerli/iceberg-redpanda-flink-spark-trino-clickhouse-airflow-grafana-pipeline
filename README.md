@@ -416,6 +416,21 @@ All layers except raw arrive via Spark batch jobs. Raw is fed by Flink SQL for t
 four webhook sources, and by `ga4_batch_ingest.py` for GA4, which reads Parquet
 exports from the volume mounted at `/opt/spark/data`.
 
+### PII Masking
+
+Direct identifiers (email, phone, name, address) are tokenized at the staging
+boundary. `raw.*` retains plaintext by design -- staging.* and every layer
+below it (semantic, core, analytics, marts, ClickHouse, Grafana) hold only
+deterministic tokens such as `email_token`, never the plaintext column. Only
+`semantic.pii_vault` maps a token back to plaintext, and the only path to it
+is the audited `detokenize()` call documented in
+`docs/RUNBOOK.md`. See `docs/DESIGN_PII_MASKING.md` for the full design,
+including what this demonstration does not defend against (raw-layer access,
+a leaked pepper) -- collected in that doc's Production Gaps table.
+
+Requires `PII_TOKEN_PEPPER` to be set in `infrastructure/.env` (see
+`.env.example`); every staging job fails immediately without it.
+
 ## Configuration
 
 ### Environment Variables
@@ -426,6 +441,10 @@ Create `infrastructure/.env` to customize:
 # MinIO
 MINIO_ROOT_USER=admin
 MINIO_ROOT_PASSWORD=admin123
+
+# PII tokenization pepper -- required, every staging job fails without it.
+# Generate with: openssl rand -hex 32
+PII_TOKEN_PEPPER=change-me-generate-with-openssl-rand-hex-32
 
 # Airflow
 AIRFLOW_POSTGRES_USER=airflow
@@ -442,7 +461,7 @@ HUBSPOT_CONTACTS=40
 ## Testing
 
 ```bash
-# Whole suite (30 tests)
+# Whole suite
 ./scripts/run_tests.sh
 
 # One file, or any pytest arguments

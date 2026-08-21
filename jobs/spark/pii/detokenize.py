@@ -62,7 +62,7 @@ ACCESS_LOG_DDL = f"""
         pii_class   STRING          COMMENT 'Class requested, NULL if mixed',
         token_count INT             COMMENT 'How many tokens were requested',
         tokens      ARRAY<STRING>   COMMENT 'Tokens requested, never plaintext',
-        accessed_at TIMESTAMP       COMMENT 'When this access was recorded'
+        accessed_at TIMESTAMP NOT NULL COMMENT 'When this access was recorded'
     )
     USING iceberg
     PARTITIONED BY (pii_class)
@@ -95,12 +95,15 @@ def _record_access(spark, tokens, actor, reason, pii_class):
     ).writeTo(ACCESS_LOG_TABLE).append()
 
 
-def detokenize(spark, tokens, actor, reason):
+def detokenize(spark, tokens, *, actor, reason):
     """
     Return vault rows for `tokens`, recording the access.
 
-    `actor` and `reason` are mandatory. They are self-reported by the caller,
-    which a production deployment must replace with an authenticated identity.
+    `actor` and `reason` are mandatory and keyword-only by design (design doc
+    Section 9): a positional call site could swap them silently, and the two
+    are only distinguishable by name, not by type -- both are plain strings.
+    They are self-reported by the caller, which a production deployment must
+    replace with an authenticated identity.
     """
     if not actor or not actor.strip():
         raise ValueError("detokenize() requires a non-empty actor")

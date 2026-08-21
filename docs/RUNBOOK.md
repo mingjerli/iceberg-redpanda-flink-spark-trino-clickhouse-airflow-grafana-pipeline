@@ -366,6 +366,127 @@ docker exec iceberg-spark-master spark-submit \
     /opt/spark/jobs/maintenance/expire_snapshots.py --retention-days 7
 ```
 
+### Migrating Existing Data to Tokenized Columns
+
+PII tokenization (`docs/DESIGN_PII_MASKING.md`) changed the staging schema:
+plaintext columns like `email` and `phone` were dropped and replaced with
+`email_token`, `phone_token`, and so on. **This is not a config toggle you can
+apply to a running stack by just deploying new code and re-triggering the
+DAG.**
+
+**Why the naive path fails.** Every staging function opens with
+`CREATE TABLE IF NOT EXISTS iceberg.staging.stg_<table> (... email_token
+STRING ...)`. Against a table that does not exist yet, this creates it with
+the new schema. Against a table that already exists from before this change,
+`IF NOT EXISTS` is a no-op -- it does **not** alter the existing table, which
+still has the old `email STRING` column and no `email_token` column at all.
+The write that follows is `.mode("append")` (or `.writeTo(...).append()` for
+GA4), which resolves columns by name against the target table's *current*
+schema. The new DataFrame produces `email_token`; the existing table has no
+column by that name. The first post-deploy write does not silently widen the
+table or drop the new column -- it fails outright with an
+`AnalysisException` (a column that cannot be resolved against the target
+table's schema), on the very first staging table processed. No data is
+written and no data is corrupted; the run simply stops there, and every
+staging table after it in the DAG's task order fails or is skipped the same
+way.
+
+**Recovery steps, in order. Step 4 is the one most easily forgotten:**
+
+1. Deploy the code with tokenization enabled.
+2. **Drop every staging table before the first post-deploy run.** Staging is
+   fully rebuildable from `raw.*`, and nothing outside the jobs this
+   migration already rebuilds in step 3 reads staging directly, so dropping
+   it is safe:
+   ```sql
+   -- via: docker exec iceberg-spark-master spark-sql <catalog confs> -e "..."
+   DROP TABLE IF EXISTS iceberg.staging.stg_shopify_orders;
+   DROP TABLE IF EXISTS iceberg.staging.stg_shopify_customers;
+   DROP TABLE IF EXISTS iceberg.staging.stg_stripe_charges;
+   DROP TABLE IF EXISTS iceberg.staging.stg_stripe_customers;
+   DROP TABLE IF EXISTS iceberg.staging.stg_hubspot_contacts;
+   DROP TABLE IF EXISTS iceberg.staging.stg_mailchimp_campaigns;
+   DROP TABLE IF EXISTS iceberg.staging.stg_mailchimp_events;
+   DROP TABLE IF EXISTS iceberg.staging.stg_mailchimp_subscribers;
+   DROP TABLE IF EXISTS iceberg.staging.stg_ga4_events;
+   DROP TABLE IF EXISTS iceberg.staging.stg_ga4_sessions;
+   ```
+   `stg_mailchimp_campaigns` has no registered PII columns and its schema did
+   not change; it is included anyway because dropping and letting
+   `CREATE TABLE IF NOT EXISTS` recreate it identically is harmless, and a
+   short uniform list is less error-prone than a hand-curated one that has to
+   stay in sync with `jobs/spark/pii/registry.py`.
+3. Run `staging_batch.py --mode full` for every table (`--table <key>`, the
+   `STAGING_FUNCTIONS` registry key, not the `stg_`-prefixed table name --
+   see `CLAUDE.md`). This recreates each table with the new schema,
+   re-tokenizes all data, and populates `semantic.pii_vault`. Then rebuild
+   semantic (`entity_backfill.py --mode initial`), core (`core_views.py`),
+   analytics (`analytics_incremental.py --mode full`), and marts
+   (`marts_incremental.py --mode full`) in full.
+   - `core.customers` and `core.orders` are recreated with `DROP TABLE` +
+     `CREATE TABLE ... AS SELECT` on every run, so they pick up the new
+     staging columns automatically and never hit the append/schema problem
+     described above.
+   - The analytics and marts jobs use a mix of `MERGE`, `.mode("overwrite")`,
+     and `.writeTo(...).createOrReplace()` depending on the table. If any of
+     them also throws a schema-mismatch `AnalysisException` in `--mode full`,
+     the fix is the same as for staging: `DROP TABLE IF EXISTS` that specific
+     table and re-run the job. Every layer below `raw` is deterministically
+     rebuildable from its inputs, so dropping and rebuilding is always a
+     safe recovery, not just a staging-specific one.
+4. `spark-submit /opt/spark/jobs/maintenance/expire_snapshots.py
+   --retention-days 0 --remove-orphans` against every rewritten table.
+
+Without step 4, Iceberg time travel keeps serving the pre-migration snapshots
+containing plaintext, and the migration is cosmetic. `--remove-orphans`
+confirms the underlying data files leave MinIO, not just the metadata
+pointers.
+
+**If you skip step 2 and go straight from step 1 to step 3:** the first
+staging job fails fast with the `AnalysisException` described above. This is
+the safe failure mode -- go back to step 2, drop the tables, and re-run step 3
+from the start. `staging_batch.py --mode full` is idempotent (`CLAUDE.md`),
+so re-running it after the drop does not double-count anything.
+
+### Detokenizing PII for an Authorized Investigation
+
+`jobs/spark/pii/detokenize.py` is the only path from a token back to
+plaintext (`docs/DESIGN_PII_MASKING.md` Section 9). There is no Trino,
+ClickHouse, or Grafana route to `semantic.pii_vault` -- this must run from a
+Spark shell inside the `spark-master` container, and every call is logged to
+`semantic.pii_access_log` (tokens requested, never the plaintext returned).
+
+```bash
+docker exec -it iceberg-spark-master /opt/spark/bin/pyspark \
+    --conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions \
+    --conf spark.sql.catalog.iceberg=org.apache.iceberg.spark.SparkCatalog \
+    --conf spark.sql.catalog.iceberg.type=rest \
+    --conf spark.sql.catalog.iceberg.uri=http://iceberg-rest:8181 \
+    --conf spark.sql.catalog.iceberg.warehouse=s3a://warehouse/ \
+    --conf spark.sql.catalog.iceberg.io-impl=org.apache.iceberg.aws.s3.S3FileIO \
+    --conf spark.sql.catalog.iceberg.s3.endpoint=http://minio:9000 \
+    --conf spark.sql.catalog.iceberg.s3.path-style-access=true \
+    --py-files /opt/spark/jobs
+```
+
+```python
+from pii.detokenize import detokenize
+
+result = detokenize(
+    spark,
+    ["tok_ab12cd34..."],          # tokens, never plaintext, as the request
+    actor="jsmith@company.com",   # keyword-only -- see design doc Section 9
+    reason="support ticket #4821",
+)
+result.show(truncate=False)
+```
+
+`actor` and `reason` are mandatory and keyword-only; a positional call raises
+`TypeError` before it reaches the vault. Both are self-reported strings, not
+an authenticated identity (`docs/DESIGN_PII_MASKING.md` Production Gaps) --
+review `semantic.pii_access_log` periodically rather than trusting the
+`actor` field alone.
+
 ### Entity Quality Check
 
 Run quality check and review report:

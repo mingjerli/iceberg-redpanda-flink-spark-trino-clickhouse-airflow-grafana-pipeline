@@ -114,15 +114,22 @@ and it is the price paid for keeping joins working without vault access.
 semantic PII class. The registry is a hand-curated dictionary, not a read of
 `schemas/*.json`.
 
-Five classes cover the direct identifiers:
+Six classes cover the direct identifiers, as shipped in
+`jobs/spark/pii/registry.py`:
 
 | Class | Columns it covers | Normalizer |
 |-------|-------------------|------------|
-| `email` | Shopify `email`, HubSpot `email`, Stripe `receipt_email`, Mailchimp `email_normalized`, GA4 `user_id` | `lower(trim(v))` |
-| `phone` | Shopify `phone`, Stripe `phone`, HubSpot `phone` and `mobile_phone`, Mailchimp `phone_normalized` | `regexp_replace(v, '[^0-9+]', '')`, then `NULL` if shorter than 7 characters |
-| `name` | `first_name`, `last_name`, `full_name` | `lower(trim(v))` |
-| `address` | `address_line1`, `address_line2`, HubSpot `address` | `lower(trim(v))` |
+| `email` | Shopify `email` (customers) and `customer_email` (orders), HubSpot `email`, Stripe `email` (customers) and `billing_email` (charges), Mailchimp `email_address` and `email_normalized` (subscribers and events), GA4 `user_id` | `lower(trim(v))` |
+| `phone` | Shopify `phone` (customers) and `customer_phone` (orders), Stripe `phone` (customers) and `billing_phone` (charges), HubSpot `phone` and `mobile_phone`, Mailchimp `phone` and `phone_normalized` | `regexp_replace(v, '[^0-9+]', '')`, then `NULL` if shorter than 7 characters |
+| `name` | `first_name`, `last_name`, `full_name`, Stripe `name` (customers) and `shipping_name`, Stripe `billing_name` (charges) | `lower(trim(v))` |
+| `address` | `address_line1`, `address_line2`, HubSpot `address`, Stripe `shipping_address_line1` | `lower(trim(v))` |
 | `name_prefix` | Derived from `last_name` for blocking only | `lower(substring(v, 1, 3))` |
+| `mailchimp_id` | Mailchimp `subscriber_id` (subscribers) and `email_id` (events) | `lower(trim(v))` |
+
+`mailchimp_id` covers `subscriber_id`, which is `MD5(lower(email))` -- an
+unsalted, publicly reproducible hash, so it is re-identifiable by dictionary
+attack with no secret at all. It is weaker than the token that replaces it,
+and it reaches `marts.customer_360.mailchimp_subscriber_id_token`.
 
 The `email` and `phone` normalizers are lifted verbatim from
 `entity_backfill.py:296` and `:299`. Token equality must reproduce today's match
@@ -131,6 +138,11 @@ equality exactly, so the normalizers cannot be rewritten from scratch.
 Note that GA4 `user_id` maps to class `email`. `entity_backfill.py:251` sets
 `user_id` to the customer's email address for entity resolution, so it must
 tokenize identically to every other email column or cross-source matching breaks.
+It is registered once, on `stg_ga4_events` -- `stg_ga4_sessions` has no entry of
+its own, because `compute_ga4_sessions` reads `user_id_token` straight through
+from `stg_ga4_events` without re-tokenizing it. Registering it a second time on
+`stg_ga4_sessions` would hash an already-tokenized value -- `token(token(email))`
+-- and silently break every GA4 cross-source match.
 
 **Production note:** In a real system `user_id` is an opaque application
 identifier rather than an email, and GA4 matching requires a separate
@@ -321,6 +333,17 @@ Tokenized columns are renamed with an explicit `_token` suffix, so `email` becom
 [Section 11](#11-testing) possible, because any bare `email` column appearing below
 the staging boundary becomes a detectable violation.
 
+`stg_mailchimp_subscribers._raw_id` is set from `subscriber_id_token`, not the
+raw `subscriber_id` value. An earlier draft of this design implied `_raw_id`
+stayed plaintext lineage, like every other table's `_raw_id`; it does not.
+`subscriber_id` is itself PII (`pii/registry.py` class `mailchimp_id`) --
+Mailchimp's own `MD5(lower(email))` convention, unsalted and publicly
+reproducible -- so writing it into `_raw_id` unmodified would defeat the
+tokenization on the very next column over. Lineage back to
+`raw.mailchimp_subscribers` is not lost: `semantic.pii_vault` maps the token
+back to that same MD5, and `raw`'s own `id` **is** that MD5, so a privileged
+job can `detokenize()` and join on it.
+
 ### Entity resolution
 
 `jobs/spark/entity_backfill.py` requires **no vault access at all**, and the job
@@ -361,6 +384,7 @@ These changes are column renames rippling downstream:
 | File | Change |
 |------|--------|
 | `jobs/spark/core_views.py:90-96` | `COALESCE(hc.email, sc.email) AS email` becomes `AS email_token`, and the same for name, phone, and address columns |
+| `jobs/spark/core_views.py:165-166` | `core.orders` carries `so.customer_email_token AS customer_email_token` and `so.customer_phone_token AS customer_phone_token`, renamed from `customer_email`/`customer_phone` |
 | `jobs/spark/marts_incremental.py:135-141` | `customer_360` drops seven plaintext columns and gains their `_token` equivalents |
 | `jobs/spark/analytics_incremental.py:132-133` | `email` and `full_name` become `email_token` and `full_name_token` |
 | `infrastructure/clickhouse/init-analytics.sql:17-18` | `email String` and `full_name String` become their `_token` equivalents |

@@ -7,8 +7,8 @@
 
 CREATE TABLE IF NOT EXISTS analytics.customer_metrics (
     customer_id                 STRING          COMMENT 'Unified customer ID',
-    email                       STRING          COMMENT 'Customer email',
-    full_name                   STRING          COMMENT 'Customer name',
+    email_token                 STRING          COMMENT 'Tokenized customer email (pii/registry.py class: email)',
+    full_name_token             STRING          COMMENT 'Tokenized customer name (class: name)',
 
     -- Segmentation
     customer_tier               STRING          COMMENT 'Tier: vip, gold, silver, bronze, new',

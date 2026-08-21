@@ -29,9 +29,9 @@ CREATE TABLE IF NOT EXISTS staging.stg_stripe_charges (
     card_country                STRING          COMMENT 'Card issuing country',
 
     -- Billing details
-    billing_name                STRING          COMMENT 'Billing name',
-    billing_email               STRING          COMMENT 'Billing email (normalized)',
-    billing_phone               STRING          COMMENT 'Billing phone',
+    billing_name_token           STRING          COMMENT 'Tokenized billing name (pii/registry.py class: name)',
+    billing_email_token          STRING          COMMENT 'Tokenized billing email (class: email)',
+    billing_phone_token          STRING          COMMENT 'Tokenized billing phone (class: phone)',
     billing_city                STRING          COMMENT 'Billing city',
     billing_country             STRING          COMMENT 'Billing country',
     billing_postal_code         STRING          COMMENT 'Billing postal code',

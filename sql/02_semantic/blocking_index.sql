@@ -1,30 +1,33 @@
 -- =============================================================================
 -- Semantic: blocking_index
 -- =============================================================================
--- Enables efficient entity resolution by grouping records with shared attributes.
--- Instead of comparing all records (O(n^2)), we only compare within blocks.
+-- A prepared index of blocking keys for entity resolution, keyed on
+-- tokens rather than plaintext (pii/registry.py) so the table holds no
+-- direct identifiers.
 --
--- Example: Block by email domain means we only compare records with @gmail.com
--- to other @gmail.com records, not to @yahoo.com records.
+-- Note: This file is reference documentation only. The actual CREATE TABLE
+-- statement is inline in jobs/spark/entity_backfill.py.
+--
+-- Note: this table is written every run but not read by any pipeline job
+-- today. It is a prepared index awaiting a matching strategy that has not
+-- been built (DESIGN_PII_MASKING.md Section 8), kept only because
+-- tests/test_ga4_entity_resolution.py asserts against it.
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS semantic.blocking_index (
-    blocking_key                STRING          COMMENT 'The blocking key value (e.g., gmail.com)',
-    blocking_type               STRING          COMMENT 'Type of blocking key: email_domain, phone_area, name_prefix',
-    source                      STRING          COMMENT 'Source system: shopify, stripe, hubspot',
-    source_id                   STRING          COMMENT 'Original ID in source system',
-    entity_id                   STRING          COMMENT 'Resolved entity ID (null if unresolved)',
-
-    -- Additional fields for comparison within block
-    email_normalized            STRING          COMMENT 'Normalized email for comparison',
-    phone_normalized            STRING          COMMENT 'Normalized phone for comparison',
-    name_soundex                STRING          COMMENT 'Soundex of name for fuzzy matching',
-
-    -- Timestamps
-    created_at                  TIMESTAMP       COMMENT 'Record creation time'
+    blocking_key                STRING NOT NULL COMMENT 'email:<email_token> | phone:<phone_token> | name_zip:<name_prefix_token>_<zip> -- never plaintext',
+    blocking_key_type           STRING NOT NULL COMMENT 'Blocking key type: email, phone, name_zip (partition key)',
+    unified_id                  STRING NOT NULL COMMENT 'Unified entity ID this row belongs to',
+    entity_type                 STRING NOT NULL COMMENT 'Entity type, e.g. customer (partition key)',
+    source                      STRING NOT NULL COMMENT 'Source system: shopify_customers, stripe_customers, hubspot_contacts, mailchimp_subscribers',
+    source_id                   STRING NOT NULL COMMENT 'Original ID in source system',
+    key_value                   STRING          COMMENT 'The raw component(s) the key was built from: the token itself for email/phone, "<name_prefix_token>_<zip>" for name_zip',
+    is_primary                  BOOLEAN         COMMENT 'Whether this is the primary blocking key for the row',
+    created_at                  TIMESTAMP NOT NULL COMMENT 'Record creation time',
+    expires_at                  TIMESTAMP       COMMENT 'Optional expiry for the blocking entry'
 )
 USING iceberg
-PARTITIONED BY (blocking_type)
+PARTITIONED BY (blocking_key_type, entity_type)
 TBLPROPERTIES (
     'format-version' = '2',
     'write.parquet.compression-codec' = 'zstd'
@@ -33,22 +36,13 @@ TBLPROPERTIES (
 -- =============================================================================
 -- Blocking Strategy
 -- =============================================================================
--- We use multiple blocking passes to balance speed and recall:
+-- Three blocking passes, all keyed on tokens (jobs/spark/entity_backfill.py):
 --
--- Pass 1: Exact email match (blocking_type = 'email_exact')
---   - Most precise, catches ~70-80% of duplicates
---   - blocking_key = normalized email
---
--- Pass 2: Email domain (blocking_type = 'email_domain')
---   - Catches variations (john.doe vs johndoe)
---   - blocking_key = email domain (e.g., 'gmail.com')
---
--- Pass 3: Phone area code (blocking_type = 'phone_area')
---   - Catches records without email
---   - blocking_key = first 3 digits of phone
---
--- Pass 4: Name prefix (blocking_type = 'name_prefix')
---   - Last resort for fuzzy matching
---   - blocking_key = first 3 chars of last name (uppercase)
---   - Requires additional Levenshtein/Jaro-Winkler comparison
+-- Pass 1: email          blocking_key = concat('email:', email_token)
+-- Pass 2: phone          blocking_key = concat('phone:', phone_token)
+-- Pass 3: name_zip       blocking_key = concat('name_zip:', last_name_prefix_token, '_', zip)
+--                        -- zip stays in the clear (pii/registry.py); the
+--                        -- surname component is tokenized because a hash
+--                        -- has no meaningful substring, so the prefix is
+--                        -- tokenized as its own value (name_prefix class).
 -- =============================================================================

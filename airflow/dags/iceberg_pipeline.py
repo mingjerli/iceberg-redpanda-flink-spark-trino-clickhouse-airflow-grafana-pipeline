@@ -44,6 +44,17 @@ MINIO_ROOT_PASSWORD = os.environ.get("MINIO_ROOT_PASSWORD", "admin123")
 # standing in for a BigQuery Export. Default matches infrastructure/.env.example.
 GA4_EXPORT_PATH = os.environ.get("GA4_EXPORT_PATH", "/opt/spark/data/ga4/events.parquet")
 
+# staging_batch.py reads PII_TOKEN_PEPPER via os.environ.get at import time
+# (jobs/spark/staging_batch.py:78), not through a Spark --conf, so it is not
+# threaded into SPARK_SUBMIT below the way MINIO_ROOT_USER/PASSWORD are. It
+# must instead already be present in the spark-master container's own
+# environment -- see PII_TOKEN_PEPPER on the spark-master service in
+# infrastructure/docker-compose.yml -- because `docker exec` inherits the
+# target container's environment, not the caller's. check_pii_pepper below
+# checks that container directly rather than trusting this DAG's own
+# environment, which would only prove Airflow has the value, not that
+# spark-master does.
+
 SPARK_SUBMIT = (
     f"docker exec {SPARK_CONTAINER} /opt/spark/bin/spark-submit "
     f"--master {SPARK_MASTER} "
@@ -99,6 +110,26 @@ with DAG(
     # Markers
     start = EmptyOperator(task_id="start")
     end = EmptyOperator(task_id="end", trigger_rule="none_failed_min_one_success")
+
+    # -------------------------------------------------------------------------
+    # Preflight: PII_TOKEN_PEPPER must be set in the spark-master container
+    # -------------------------------------------------------------------------
+    # Every staging function calls tokenize_frame(), which raises
+    # ValueError("PII_TOKEN_PEPPER is empty; refusing to emit unsalted
+    # tokens") unconditionally -- even stg_mailchimp_campaigns, which has no
+    # registered PII columns. Without this gate that failure surfaces deep in
+    # a Spark stack trace on the first staging task instead of here, with a
+    # clear message, before any task runs.
+    check_pii_pepper = BashOperator(
+        task_id="check_pii_pepper",
+        bash_command=(
+            f"docker exec {SPARK_CONTAINER} sh -c 'test -n \"$PII_TOKEN_PEPPER\"' "
+            "|| { echo 'PII_TOKEN_PEPPER is not set in the spark-master container "
+            "environment. Set PII_TOKEN_PEPPER in infrastructure/.env (see "
+            ".env.example for the generation command), run: docker-compose up -d "
+            "spark-master -- then retry this DAG.'; exit 1; }"
+        ),
+    )
 
     # -------------------------------------------------------------------------
     # Staging Layer: raw -> staging
@@ -276,12 +307,19 @@ with DAG(
     # Dependencies
     # -------------------------------------------------------------------------
 
-    # Staging: parallel from start (webhook sources)
-    start >> [stg_shopify_orders, stg_shopify_customers, stg_stripe_charges, stg_stripe_customers, stg_hubspot_contacts,
-              stg_mailchimp_campaigns, stg_mailchimp_events, stg_mailchimp_subscribers]
+    # PII pepper gate: every staging task below calls tokenize_frame(), which
+    # dies immediately if PII_TOKEN_PEPPER is unset. Fail here, fast and
+    # legibly, instead of on the first staging task's Spark stack trace.
+    start >> check_pii_pepper
 
-    # GA4: batch ingestion -> staging events -> staging sessions
-    start >> ga4_batch_ingest >> stg_ga4_events >> stg_ga4_sessions
+    # Staging: parallel from start (webhook sources)
+    check_pii_pepper >> [stg_shopify_orders, stg_shopify_customers, stg_stripe_charges, stg_stripe_customers,
+                          stg_hubspot_contacts, stg_mailchimp_campaigns, stg_mailchimp_events, stg_mailchimp_subscribers]
+
+    # GA4: batch ingestion doesn't tokenize (raw layer only), so it does not
+    # need the gate; stg_ga4_events does, since it tokenizes user_id.
+    start >> ga4_batch_ingest
+    [check_pii_pepper, ga4_batch_ingest] >> stg_ga4_events >> stg_ga4_sessions
 
     # Semantic: needs customer data from all sources (including GA4)
     [stg_shopify_customers, stg_stripe_customers, stg_hubspot_contacts, stg_mailchimp_subscribers, stg_ga4_sessions] >> entity_index

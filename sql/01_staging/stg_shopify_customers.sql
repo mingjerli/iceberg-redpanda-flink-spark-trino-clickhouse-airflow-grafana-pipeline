@@ -8,15 +8,16 @@
 
 CREATE TABLE IF NOT EXISTS staging.stg_shopify_customers (
     customer_id                 BIGINT          COMMENT 'Unique customer identifier',
-    email                       STRING          COMMENT 'Normalized email (lowercase, trimmed)',
-    first_name                  STRING          COMMENT 'First name',
-    last_name                   STRING          COMMENT 'Last name',
-    full_name                   STRING          COMMENT 'Concatenated full name',
-    phone                       STRING          COMMENT 'Phone number',
+    email_token                 STRING          COMMENT 'Tokenized email (pii/registry.py class: email)',
+    first_name_token            STRING          COMMENT 'Tokenized first name (class: name)',
+    last_name_token             STRING          COMMENT 'Tokenized last name (class: name)',
+    full_name_token             STRING          COMMENT 'Tokenized full name (class: name)',
+    phone_token                 STRING          COMMENT 'Tokenized phone (class: phone)',
+    last_name_prefix_token      STRING          COMMENT 'Tokenized 3-char last-name prefix, for name_zip blocking (class: name_prefix)',
 
     -- Address
-    address_line1               STRING          COMMENT 'Street address line 1',
-    address_line2               STRING          COMMENT 'Street address line 2',
+    address_line1_token         STRING          COMMENT 'Tokenized street address line 1 (class: address)',
+    address_line2_token         STRING          COMMENT 'Tokenized street address line 2 (class: address)',
     city                        STRING          COMMENT 'City',
     province                    STRING          COMMENT 'State/province',
     province_code               STRING          COMMENT 'Province ISO code',

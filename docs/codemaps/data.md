@@ -52,7 +52,7 @@
 
 | Table | Key Columns | Join Logic |
 |-------|-------------|------------|
-| `core.customers` | customer_id (=unified_id), email, full_name, source_count, has_shopify, has_stripe, has_hubspot | entity_index LEFT JOIN all staging sources |
+| `core.customers` | customer_id (=unified_id), email_token, full_name_token, source_count, has_shopify, has_stripe, has_hubspot | entity_index LEFT JOIN all staging sources |
 | `core.orders` | order_id, customer_id (unified), total_price, financial_status | stg_shopify_orders JOIN entity_index for customer_id mapping |
 
 ### Layer 4: Analytics (4 tables) — Spark analytics_incremental.py
