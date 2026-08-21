@@ -61,12 +61,21 @@ from pyspark.sql.functions import (
     when,
 )
 
+from pii.tokenize import tokenize_frame
+from pii.vault import upsert_vault
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Pepper for PII tokenization (jobs/spark/pii/tokenize.py). tokenize_frame()
+# raises ValueError on an empty pepper, refusing to emit unsalted tokens --
+# even for a table with no registered PII, so this must be configured before
+# any staging function runs.
+PII_TOKEN_PEPPER = os.environ.get("PII_TOKEN_PEPPER", "")
 
 
 def create_spark_session() -> SparkSession:
@@ -262,6 +271,12 @@ def stage_shopify_orders(spark: SparkSession, mode: str = "incremental"):
         current_timestamp().alias("_staged_at")
     )
 
+    # No registered PII columns for this table (schemas/*.json is inconsistent
+    # for orders; see jobs/spark/pii/registry.py), so this is a safe no-op:
+    # tokenize_frame returns the frame unchanged and vault_df=None.
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_shopify_orders", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+
     # Write to staging
     staged_df.write \
         .format("iceberg") \
@@ -281,13 +296,14 @@ def stage_shopify_customers(spark: SparkSession, mode: str = "incremental"):
     spark.sql("""
         CREATE TABLE IF NOT EXISTS iceberg.staging.stg_shopify_customers (
             customer_id BIGINT,
-            email STRING,
-            first_name STRING,
-            last_name STRING,
-            full_name STRING,
-            phone STRING,
-            address_line1 STRING,
-            address_line2 STRING,
+            email_token STRING,
+            first_name_token STRING,
+            last_name_token STRING,
+            full_name_token STRING,
+            phone_token STRING,
+            last_name_prefix_token STRING,
+            address_line1_token STRING,
+            address_line2_token STRING,
             city STRING,
             province STRING,
             province_code STRING,
@@ -391,6 +407,9 @@ def stage_shopify_customers(spark: SparkSession, mode: str = "incremental"):
         current_timestamp().alias("_staged_at")
     )
 
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_shopify_customers", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+
     # Write to staging
     staged_df.write \
         .format("iceberg") \
@@ -425,9 +444,9 @@ def stage_stripe_charges(spark: SparkSession, mode: str = "incremental"):
             card_exp_year INT,
             card_funding STRING,
             card_country STRING,
-            billing_name STRING,
-            billing_email STRING,
-            billing_phone STRING,
+            billing_name_token STRING,
+            billing_email_token STRING,
+            billing_phone_token STRING,
             billing_city STRING,
             billing_country STRING,
             billing_postal_code STRING,
@@ -539,6 +558,9 @@ def stage_stripe_charges(spark: SparkSession, mode: str = "incremental"):
         current_timestamp().alias("_staged_at")
     )
 
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_stripe_charges", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+
     # Write to staging
     staged_df.write \
         .format("iceberg") \
@@ -558,20 +580,21 @@ def stage_stripe_customers(spark: SparkSession, mode: str = "incremental"):
     spark.sql("""
         CREATE TABLE IF NOT EXISTS iceberg.staging.stg_stripe_customers (
             customer_id STRING,
-            email STRING,
-            name STRING,
-            first_name STRING,
-            last_name STRING,
-            full_name STRING,
-            phone STRING,
-            address_line1 STRING,
-            address_line2 STRING,
+            email_token STRING,
+            name_token STRING,
+            first_name_token STRING,
+            last_name_token STRING,
+            full_name_token STRING,
+            phone_token STRING,
+            last_name_prefix_token STRING,
+            address_line1_token STRING,
+            address_line2_token STRING,
             city STRING,
             state STRING,
             postal_code STRING,
             country STRING,
-            shipping_name STRING,
-            shipping_address_line1 STRING,
+            shipping_name_token STRING,
+            shipping_address_line1_token STRING,
             shipping_city STRING,
             shipping_state STRING,
             shipping_postal_code STRING,
@@ -655,6 +678,9 @@ def stage_stripe_customers(spark: SparkSession, mode: str = "incremental"):
         current_timestamp().alias("_staged_at")
     )
 
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_stripe_customers", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+
     # Write to staging
     staged_df.write \
         .format("iceberg") \
@@ -674,13 +700,14 @@ def stage_hubspot_contacts(spark: SparkSession, mode: str = "incremental"):
     spark.sql("""
         CREATE TABLE IF NOT EXISTS iceberg.staging.stg_hubspot_contacts (
             contact_id STRING,
-            email STRING,
-            first_name STRING,
-            last_name STRING,
-            full_name STRING,
-            phone STRING,
-            mobile_phone STRING,
-            address STRING,
+            email_token STRING,
+            first_name_token STRING,
+            last_name_token STRING,
+            full_name_token STRING,
+            phone_token STRING,
+            mobile_phone_token STRING,
+            last_name_prefix_token STRING,
+            address_token STRING,
             city STRING,
             state STRING,
             zip STRING,
@@ -839,6 +866,9 @@ def stage_hubspot_contacts(spark: SparkSession, mode: str = "incremental"):
         col("contact_id").isNotNull()
     )
 
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_hubspot_contacts", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+
     # Write to staging
     staged_df.write \
         .format("iceberg") \
@@ -943,6 +973,12 @@ def stage_mailchimp_campaigns(spark: SparkSession, mode: str = "incremental"):
         current_timestamp().alias("_staged_at"),
     )
 
+    # No registered PII columns for this table (from_email/reply_to are the
+    # campaign sender, not a customer identifier); tokenize_frame is a safe
+    # no-op here.
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_mailchimp_campaigns", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+
     staged_df.write \
         .format("iceberg") \
         .mode("append") \
@@ -962,9 +998,9 @@ def stage_mailchimp_events(spark: SparkSession, mode: str = "incremental"):
             _raw_id STRING,
             event_id STRING,
             campaign_id STRING,
-            email_id STRING,
-            email_address STRING,
-            email_normalized STRING,
+            email_id_token STRING,
+            email_address_token STRING,
+            email_normalized_token STRING,
             action STRING,
             event_timestamp TIMESTAMP,
             event_date DATE,
@@ -1030,6 +1066,9 @@ def stage_mailchimp_events(spark: SparkSession, mode: str = "incremental"):
         current_timestamp().alias("_staged_at"),
     )
 
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_mailchimp_events", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+
     staged_df.write \
         .format("iceberg") \
         .mode("append") \
@@ -1047,16 +1086,17 @@ def stage_mailchimp_subscribers(spark: SparkSession, mode: str = "incremental"):
     spark.sql("""
         CREATE TABLE IF NOT EXISTS iceberg.staging.stg_mailchimp_subscribers (
             _raw_id STRING,
-            subscriber_id STRING,
-            email_address STRING,
-            email_normalized STRING,
+            subscriber_id_token STRING,
+            email_address_token STRING,
+            email_normalized_token STRING,
             email_type STRING,
             status STRING,
-            first_name STRING,
-            last_name STRING,
-            full_name STRING,
-            phone STRING,
-            phone_normalized STRING,
+            first_name_token STRING,
+            last_name_token STRING,
+            full_name_token STRING,
+            last_name_prefix_token STRING,
+            phone_token STRING,
+            phone_normalized_token STRING,
             merge_fields STRING,
             stats STRING,
             avg_open_rate DECIMAL(5, 4),
@@ -1159,6 +1199,9 @@ def stage_mailchimp_subscribers(spark: SparkSession, mode: str = "incremental"):
         current_timestamp().alias("_staged_at"),
     )
 
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_mailchimp_subscribers", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+
     staged_df.write \
         .format("iceberg") \
         .mode("append") \
@@ -1225,6 +1268,11 @@ def stage_ga4_events(spark, mode="incremental"):
         col("_raw_id"), col("_loaded_at"), current_timestamp().alias("_staged_at")
     )
 
+    # No registered PII columns for this table (stg_ga4_sessions carries the
+    # tokenized user_id downstream, in compute_ga4_sessions); safe no-op here.
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_ga4_events", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+
     if mode == "full":
         staged_df.writeTo("iceberg.staging.stg_ga4_events").using("iceberg").createOrReplace()
     else:
@@ -1242,7 +1290,7 @@ def compute_ga4_sessions(spark, mode="incremental"):
 
     spark.sql("""
         CREATE TABLE IF NOT EXISTS staging.stg_ga4_sessions (
-            session_id STRING, client_id STRING, user_id STRING, session_start TIMESTAMP,
+            session_id STRING, client_id STRING, user_id_token STRING, session_start TIMESTAMP,
             session_end TIMESTAMP, session_duration_sec INT, event_count INT, page_view_count INT,
             is_engaged_session BOOLEAN, traffic_source STRING, traffic_medium STRING,
             traffic_campaign STRING, channel_group STRING, landing_page STRING, exit_page STRING,
@@ -1308,6 +1356,9 @@ def compute_ga4_sessions(spark, mode="incremental"):
         .withColumn("is_bounce", (col("page_view_count") <= 1) & (~col("is_engaged_session"))) \
         .withColumn("_staged_at", current_timestamp()) \
         .drop("t_src", "t_med", "t_camp", "d_cat", "d_os", "g_cty", "g_reg", "land", "exit", "sess_num")
+
+    sessions, vault_df = tokenize_frame(sessions, "stg_ga4_sessions", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
 
     # Full recomputation regardless of mode: the read above is unfiltered,
     # so this must replace rather than append. Appending a complete

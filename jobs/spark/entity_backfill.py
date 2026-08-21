@@ -39,12 +39,8 @@ from pyspark.sql.functions import (
     concat_ws,
     current_timestamp,
     expr,
-    length,
     lit,
-    lower,
-    regexp_replace,
     row_number,
-    trim,
     when,
 )
 from pyspark.sql.window import Window
@@ -168,12 +164,13 @@ def get_all_staging_customers(
         SELECT
             'shopify_customers' AS source,
             CAST(customer_id AS STRING) AS source_id,
-            email,
-            first_name,
-            last_name,
-            full_name,
-            phone,
-            address_line1 AS address,
+            email_token,
+            first_name_token,
+            last_name_token,
+            full_name_token,
+            phone_token,
+            last_name_prefix_token,
+            address_line1_token AS address_token,
             city,
             province AS state,
             zip,
@@ -189,12 +186,13 @@ def get_all_staging_customers(
         SELECT
             'hubspot_contacts' AS source,
             contact_id AS source_id,
-            email,
-            first_name,
-            last_name,
-            full_name,
-            COALESCE(phone, mobile_phone) AS phone,
-            address,
+            email_token,
+            first_name_token,
+            last_name_token,
+            full_name_token,
+            COALESCE(phone_token, mobile_phone_token) AS phone_token,
+            last_name_prefix_token,
+            address_token,
             city,
             state,
             zip,
@@ -210,12 +208,13 @@ def get_all_staging_customers(
         SELECT
             'stripe_customers' AS source,
             customer_id AS source_id,
-            email,
-            first_name,
-            last_name,
-            full_name,
-            phone,
-            address_line1 AS address,
+            email_token,
+            first_name_token,
+            last_name_token,
+            full_name_token,
+            phone_token,
+            last_name_prefix_token,
+            address_line1_token AS address_token,
             city,
             state,
             postal_code AS zip,
@@ -230,13 +229,14 @@ def get_all_staging_customers(
     mailchimp = spark.sql(f"""
         SELECT
             'mailchimp_subscribers' AS source,
-            CAST(subscriber_id AS STRING) AS source_id,
-            email_normalized AS email,
-            first_name,
-            last_name,
-            full_name,
-            phone_normalized AS phone,
-            CAST(NULL AS STRING) AS address,
+            CAST(subscriber_id_token AS STRING) AS source_id,
+            email_normalized_token AS email_token,
+            first_name_token,
+            last_name_token,
+            full_name_token,
+            phone_normalized_token AS phone_token,
+            last_name_prefix_token,
+            CAST(NULL AS STRING) AS address_token,
             CAST(NULL AS STRING) AS city,
             CAST(NULL AS STRING) AS state,
             CAST(NULL AS STRING) AS zip,
@@ -248,17 +248,19 @@ def get_all_staging_customers(
     """)
 
     # GA4 sessions (only logged-in users with user_id)
-    # Note: user_id in GA4 is set to email for entity resolution demo
+    # Note: user_id in GA4 is set to email for entity resolution demo, so
+    # user_id_token carries class email like every other source's email_token.
     ga4 = spark.sql(f"""
         SELECT
             'ga4_sessions' AS source,
             CAST(client_id AS STRING) AS source_id,
-            user_id AS email,
-            CAST(NULL AS STRING) AS first_name,
-            CAST(NULL AS STRING) AS last_name,
-            CAST(NULL AS STRING) AS full_name,
-            CAST(NULL AS STRING) AS phone,
-            CAST(NULL AS STRING) AS address,
+            user_id_token AS email_token,
+            CAST(NULL AS STRING) AS first_name_token,
+            CAST(NULL AS STRING) AS last_name_token,
+            CAST(NULL AS STRING) AS full_name_token,
+            CAST(NULL AS STRING) AS phone_token,
+            CAST(NULL AS STRING) AS last_name_prefix_token,
+            CAST(NULL AS STRING) AS address_token,
             CAST(NULL AS STRING) AS city,
             CAST(NULL AS STRING) AS state,
             CAST(NULL AS STRING) AS zip,
@@ -266,8 +268,8 @@ def get_all_staging_customers(
             session_start AS created_at,
             _staged_at
         FROM iceberg.staging.stg_ga4_sessions
-        WHERE user_id IS NOT NULL
-          AND user_id != ''
+        WHERE user_id_token IS NOT NULL
+          AND user_id_token != ''
           {date_filter}
     """)
 
@@ -290,14 +292,12 @@ def perform_initial_resolution(spark: SparkSession, staging_data: DataFrame, dry
     """
     logger.info("Performing initial entity resolution...")
 
-    # Normalize email for matching
-    prepared = staging_data.withColumn(
-        "normalized_email",
-        lower(trim(col("email")))
-    ).withColumn(
-        "normalized_phone",
-        regexp_replace(col("phone"), "[^0-9+]", "")
-    )
+    # Values arrive pre-normalized: staging tokenizes email/phone as its last
+    # step, so exact-token equality reproduces the previous lower(trim(email))
+    # match exactly. Keeping the internal names normalized_email/normalized_phone
+    # means the windowing below needs no further change.
+    prepared = staging_data.withColumnRenamed("email_token", "normalized_email") \
+                           .withColumnRenamed("phone_token", "normalized_phone")
 
     # Group by normalized email to find matching records
     # Records with the same email get the same unified_id
@@ -349,7 +349,7 @@ def perform_initial_resolution(spark: SparkSession, staging_data: DataFrame, dry
         "match_reason",
         when(
             col("match_type") == "exact_email",
-            concat(lit("Matched via email: "), col("normalized_email"))
+            concat(lit("Matched via email token: "), col("normalized_email"))
         ).otherwise(lit("New entity created during backfill"))
     ).select(
         col("unified_id"),
@@ -385,8 +385,7 @@ def perform_initial_resolution(spark: SparkSession, staging_data: DataFrame, dry
     # Phone blocking keys
     phone_blocking = with_unified_id.filter(
         (col("normalized_phone").isNotNull()) &
-        (col("normalized_phone") != "") &
-        (length(col("normalized_phone")) >= 7)
+        (col("normalized_phone") != "")
     ).select(
         concat(lit("phone:"), col("normalized_phone")).alias("blocking_key"),
         lit("phone").alias("blocking_key_type"),
@@ -402,12 +401,12 @@ def perform_initial_resolution(spark: SparkSession, staging_data: DataFrame, dry
 
     # Name+zip blocking keys (for fuzzy matching)
     name_zip_blocking = with_unified_id.filter(
-        (col("last_name").isNotNull()) &
+        (col("last_name_prefix_token").isNotNull()) &
         (col("zip").isNotNull())
     ).select(
         concat(
             lit("name_zip:"),
-            lower(expr("substring(last_name, 1, 3)")),
+            col("last_name_prefix_token"),
             lit("_"),
             col("zip")
         ).alias("blocking_key"),
@@ -416,7 +415,7 @@ def perform_initial_resolution(spark: SparkSession, staging_data: DataFrame, dry
         lit("customer").alias("entity_type"),
         col("source"),
         col("source_id"),
-        concat_ws("_", lower(expr("substring(last_name, 1, 3)")), col("zip")).alias("key_value"),
+        concat_ws("_", col("last_name_prefix_token"), col("zip")).alias("key_value"),
         lit(False).alias("is_primary"),
         current_timestamp().alias("created_at"),
         lit(None).cast("timestamp").alias("expires_at")
@@ -480,9 +479,12 @@ def rebuild_blocking_index(spark: SparkSession, dry_run: bool):
             ei.unified_id,
             ei.source,
             ei.source_id,
-            LOWER(TRIM(COALESCE(hc.email, sc.email, stc.email, mc.email_normalized, ga4_sub.user_id))) AS normalized_email,
-            REGEXP_REPLACE(COALESCE(hc.phone, hc.mobile_phone, sc.phone, stc.phone, mc.phone_normalized), '[^0-9+]', '') AS normalized_phone,
-            COALESCE(hc.last_name, sc.last_name, stc.last_name, mc.last_name) AS last_name,
+            COALESCE(hc.email_token, sc.email_token, stc.email_token,
+                     mc.email_normalized_token, ga4_sub.user_id_token) AS normalized_email,
+            COALESCE(hc.phone_token, hc.mobile_phone_token, sc.phone_token,
+                     stc.phone_token, mc.phone_normalized_token) AS normalized_phone,
+            COALESCE(hc.last_name_prefix_token, sc.last_name_prefix_token,
+                     stc.last_name_prefix_token, mc.last_name_prefix_token) AS last_name_prefix_token,
             COALESCE(hc.zip, sc.zip, stc.postal_code) AS zip
         FROM iceberg.semantic.entity_index ei
         LEFT JOIN iceberg.staging.stg_shopify_customers sc
@@ -496,11 +498,11 @@ def rebuild_blocking_index(spark: SparkSession, dry_run: bool):
             AND ei.source_id = stc.customer_id
         LEFT JOIN iceberg.staging.stg_mailchimp_subscribers mc
             ON ei.source = 'mailchimp_subscribers'
-            AND ei.source_id = mc.subscriber_id
+            AND ei.source_id = mc.subscriber_id_token
         LEFT JOIN (
             SELECT
                 client_id,
-                user_id,
+                user_id_token,
                 geo_country,
                 session_start,
                 ROW_NUMBER() OVER (
@@ -508,7 +510,7 @@ def rebuild_blocking_index(spark: SparkSession, dry_run: bool):
                     ORDER BY session_start DESC
                 ) AS rn
             FROM iceberg.staging.stg_ga4_sessions
-            WHERE user_id IS NOT NULL AND user_id != ''
+            WHERE user_id_token IS NOT NULL AND user_id_token != ''
         ) ga4_sub ON ei.source = 'ga4_sessions' AND ei.source_id = ga4_sub.client_id AND ga4_sub.rn = 1
         WHERE ei.entity_type = 'customer'
           AND ei.linked_to_unified_id IS NULL
@@ -533,8 +535,7 @@ def rebuild_blocking_index(spark: SparkSession, dry_run: bool):
     # Build phone blocking keys
     phone_keys = entities.filter(
         (col("normalized_phone").isNotNull()) &
-        (col("normalized_phone") != "") &
-        (length(col("normalized_phone")) >= 7)
+        (col("normalized_phone") != "")
     ).select(
         concat(lit("phone:"), col("normalized_phone")).alias("blocking_key"),
         lit("phone").alias("blocking_key_type"),
@@ -550,11 +551,11 @@ def rebuild_blocking_index(spark: SparkSession, dry_run: bool):
 
     # Build name_zip blocking keys
     name_zip_keys = entities.filter(
-        (col("last_name").isNotNull()) & (col("zip").isNotNull())
+        (col("last_name_prefix_token").isNotNull()) & (col("zip").isNotNull())
     ).select(
         concat(
             lit("name_zip:"),
-            lower(expr("substring(last_name, 1, 3)")),
+            col("last_name_prefix_token"),
             lit("_"),
             col("zip")
         ).alias("blocking_key"),
@@ -563,7 +564,7 @@ def rebuild_blocking_index(spark: SparkSession, dry_run: bool):
         lit("customer").alias("entity_type"),
         col("source"),
         col("source_id"),
-        concat_ws("_", lower(expr("substring(last_name, 1, 3)")), col("zip")).alias("key_value"),
+        concat_ws("_", col("last_name_prefix_token"), col("zip")).alias("key_value"),
         lit(False).alias("is_primary"),
         current_timestamp().alias("created_at"),
         lit(None).cast("timestamp").alias("expires_at")

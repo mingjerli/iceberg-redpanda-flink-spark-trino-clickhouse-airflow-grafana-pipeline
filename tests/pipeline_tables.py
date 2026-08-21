@@ -57,31 +57,35 @@ GA4_EXPORT_SCHEMA = StructType([
 # and ::rebuild_blocking_index.
 STAGING_TABLE_DDL = {
     "stg_shopify_customers": """
-        customer_id STRING, email STRING, first_name STRING, last_name STRING,
-        full_name STRING, phone STRING, address_line1 STRING, city STRING,
-        province STRING, zip STRING, country STRING,
+        customer_id STRING, email_token STRING, first_name_token STRING,
+        last_name_token STRING, full_name_token STRING, phone_token STRING,
+        last_name_prefix_token STRING, address_line1_token STRING,
+        city STRING, province STRING, zip STRING, country STRING,
         created_at TIMESTAMP, _staged_at TIMESTAMP
     """,
     "stg_hubspot_contacts": """
-        contact_id STRING, email STRING, first_name STRING, last_name STRING,
-        full_name STRING, phone STRING, mobile_phone STRING, address STRING,
-        city STRING, state STRING, zip STRING, country STRING,
-        created_at TIMESTAMP, _staged_at TIMESTAMP
+        contact_id STRING, email_token STRING, first_name_token STRING,
+        last_name_token STRING, full_name_token STRING, phone_token STRING,
+        mobile_phone_token STRING, last_name_prefix_token STRING,
+        address_token STRING, city STRING, state STRING, zip STRING,
+        country STRING, created_at TIMESTAMP, _staged_at TIMESTAMP
     """,
     "stg_stripe_customers": """
-        customer_id STRING, email STRING, first_name STRING, last_name STRING,
-        full_name STRING, phone STRING, address_line1 STRING, city STRING,
-        state STRING, postal_code STRING, country STRING,
+        customer_id STRING, email_token STRING, first_name_token STRING,
+        last_name_token STRING, full_name_token STRING, phone_token STRING,
+        last_name_prefix_token STRING, address_line1_token STRING,
+        city STRING, state STRING, postal_code STRING, country STRING,
         created_at TIMESTAMP, _staged_at TIMESTAMP
     """,
     "stg_mailchimp_subscribers": """
-        subscriber_id STRING, email_normalized STRING, first_name STRING,
-        last_name STRING, full_name STRING, phone_normalized STRING,
+        subscriber_id_token STRING, email_normalized_token STRING,
+        first_name_token STRING, last_name_token STRING, full_name_token STRING,
+        last_name_prefix_token STRING, phone_normalized_token STRING,
         signup_timestamp TIMESTAMP, _staged_at TIMESTAMP
     """,
     # Mirrors the schema created by staging_batch.py::compute_ga4_sessions.
     "stg_ga4_sessions": """
-        session_id STRING, client_id STRING, user_id STRING, session_start TIMESTAMP,
+        session_id STRING, client_id STRING, user_id_token STRING, session_start TIMESTAMP,
         session_end TIMESTAMP, session_duration_sec INT, event_count INT,
         page_view_count INT, is_engaged_session BOOLEAN, traffic_source STRING,
         traffic_medium STRING, traffic_campaign STRING, channel_group STRING,
