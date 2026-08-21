@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 
+from pyspark.sql import Row
 from pyspark.sql.types import IntegerType, StringType, StructField, StructType
 
 logger = logging.getLogger(__name__)
@@ -60,9 +61,11 @@ def upsert_vault(spark, vault_df):
     before = spark.table(VAULT_TABLE).count()
 
     # Reconstruct with explicit non-nullable schema. tokenize_frame returns
-    # nullable columns due to unionByName behavior, but all values are
-    # non-null by construction (pii_class and plaintext are never NULL).
-    # Iceberg's strict schema validation requires the source to match.
+    # nullable columns because token_expr and normalize return when().otherwise()
+    # expressions which are nullable by construction; .where(token.isNotNull())
+    # filters rows but doesn't narrow schema nullability. Use named Row
+    # construction to map values by name, preventing silent column swaps if
+    # this list is reordered in future edits.
     target_schema = StructType([
         StructField("token", StringType(), False),
         StructField("pii_class", StringType(), False),
@@ -72,8 +75,13 @@ def upsert_vault(spark, vault_df):
     ])
 
     vault_df.dropDuplicates(["token"]) \
-        .select("token", "pii_class", "plaintext", "key_version", "_first_source") \
-        .rdd.map(lambda r: r) \
+        .rdd.map(lambda r: Row(
+            token=r["token"],
+            pii_class=r["pii_class"],
+            plaintext=r["plaintext"],
+            key_version=r["key_version"],
+            _first_source=r["_first_source"],
+        )) \
         .toDF(schema=target_schema) \
         .createOrReplaceTempView("pii_vault_updates")
 
