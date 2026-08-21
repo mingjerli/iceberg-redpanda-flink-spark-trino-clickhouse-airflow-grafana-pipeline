@@ -14,8 +14,8 @@ CREATE DATABASE IF NOT EXISTS analytics;
 CREATE TABLE IF NOT EXISTS analytics.customer_metrics
 (
     customer_id String,
-    email String,
-    full_name String,
+    email_token String,
+    full_name_token String,
     customer_tier LowCardinality(String),
     customer_segment LowCardinality(String),
     total_spent Decimal(18, 2),

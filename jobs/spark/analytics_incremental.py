@@ -129,8 +129,8 @@ def compute_customer_metrics(spark: SparkSession, mode: str = "incremental"):
     spark.sql("""
         CREATE TABLE IF NOT EXISTS iceberg.analytics.customer_metrics (
             customer_id STRING,
-            email STRING,
-            full_name STRING,
+            email_token STRING,
+            full_name_token STRING,
             customer_tier STRING,
             lifecycle_stage STRING,
             customer_segment STRING,
@@ -185,8 +185,8 @@ def compute_customer_metrics(spark: SparkSession, mode: str = "incremental"):
             customers_df = spark.table("iceberg.staging.stg_shopify_customers")
             customers_df = customers_df.select(
                 col("customer_id").cast("string").alias("customer_id"),
-                col("email"),
-                col("full_name"),
+                col("email_token"),
+                col("full_name_token"),
                 col("customer_tier"),
                 lit("customer").alias("lifecycle_stage"),
                 col("total_spent"),
@@ -261,8 +261,8 @@ def compute_customer_metrics(spark: SparkSession, mode: str = "incremental"):
     # Compute derived metrics
     metrics_df = metrics_df.select(
         col("customer_id"),
-        col("email"),
-        col("full_name"),
+        col("email_token"),
+        col("full_name_token"),
         coalesce(col("customer_tier"), lit("new")).alias("customer_tier"),
         coalesce(col("lifecycle_stage"), lit("prospect")).alias("lifecycle_stage"),
         # Derived segment
