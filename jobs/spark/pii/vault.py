@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import logging
 
+from pyspark.sql.types import IntegerType, StringType, StructField, StructType
+
 logger = logging.getLogger(__name__)
 
 VAULT_TABLE = "iceberg.semantic.pii_vault"
@@ -23,7 +25,7 @@ VAULT_TABLE = "iceberg.semantic.pii_vault"
 VAULT_DDL = f"""
     CREATE TABLE IF NOT EXISTS {VAULT_TABLE} (
         token          STRING NOT NULL COMMENT 'Deterministic token, primary key',
-        pii_class      STRING         COMMENT 'email | phone | name | address | name_prefix | mailchimp_id',
+        pii_class      STRING NOT NULL COMMENT 'email | phone | name | address | name_prefix | mailchimp_id',
         plaintext      STRING NOT NULL COMMENT 'Original normalized value',
         key_version    INT            COMMENT 'Pepper version used to derive token',
         _first_seen_at TIMESTAMP      COMMENT 'When this token was first written',
@@ -57,7 +59,24 @@ def upsert_vault(spark, vault_df):
     create_vault(spark)
     before = spark.table(VAULT_TABLE).count()
 
-    vault_df.dropDuplicates(["token"]).createOrReplaceTempView("pii_vault_updates")
+    # Reconstruct with explicit non-nullable schema. tokenize_frame returns
+    # nullable columns due to unionByName behavior, but all values are
+    # non-null by construction (pii_class and plaintext are never NULL).
+    # Iceberg's strict schema validation requires the source to match.
+    target_schema = StructType([
+        StructField("token", StringType(), False),
+        StructField("pii_class", StringType(), False),
+        StructField("plaintext", StringType(), False),
+        StructField("key_version", IntegerType(), True),
+        StructField("_first_source", StringType(), True),
+    ])
+
+    vault_df.dropDuplicates(["token"]) \
+        .select("token", "pii_class", "plaintext", "key_version", "_first_source") \
+        .rdd.map(lambda r: r) \
+        .toDF(schema=target_schema) \
+        .createOrReplaceTempView("pii_vault_updates")
+
     spark.sql(f"""
         MERGE INTO {VAULT_TABLE} AS target
         USING pii_vault_updates AS source
