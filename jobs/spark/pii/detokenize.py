@@ -102,9 +102,9 @@ def detokenize(spark, tokens, actor, reason):
     `actor` and `reason` are mandatory. They are self-reported by the caller,
     which a production deployment must replace with an authenticated identity.
     """
-    if not actor:
+    if not actor or not actor.strip():
         raise ValueError("detokenize() requires a non-empty actor")
-    if not reason:
+    if not reason or not reason.strip():
         raise ValueError("detokenize() requires a non-empty reason")
 
     tokens = list(tokens)

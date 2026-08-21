@@ -48,7 +48,10 @@ def test_detokenize_writes_an_audit_row(spark, seeded_token):
 def test_audit_log_stores_tokens_not_plaintext(spark, seeded_token):
     detokenize(spark, [seeded_token], actor="tester", reason="unit test")
     row = spark.table(ACCESS_LOG_TABLE).collect()[0]
-    assert seeded_token in row["tokens"]
+    assert row["tokens"] == [seeded_token]
+    assert "ada@example.com" not in row["tokens"]
+    assert "ada@example.com" not in (row["reason"] or "")
+    assert "ada@example.com" not in (row["actor"] or "")
     assert "plaintext" not in spark.table(ACCESS_LOG_TABLE).columns
 
 
