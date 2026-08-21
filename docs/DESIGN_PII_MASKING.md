@@ -1,6 +1,6 @@
 # PII Masking via Vault-Backed Tokenization
 
-**Status:** Design approved and staff-reviewed, not yet implemented
+**Status:** Design approved and staff-reviewed, not yet implemented (9 review findings folded in)
 **Date:** 2026-08-21
 **Scope:** Direct identifiers across all five sources
 
@@ -40,7 +40,10 @@ Three findings motivate this work:
 `full_name` (`jobs/spark/analytics_incremental.py:132-133`), and ClickHouse
 mirrors both (`infrastructure/clickhouse/init-analytics.sql:17-18`).
 
-**The semantic layer stores a plaintext email and phone lookup.**
+**The semantic layer stores plaintext in two tables.**
+`semantic.entity_index.match_reason` is written as
+`concat("Matched via email: ", normalized_email)` (`entity_backfill.py:352`), so
+every matched row carries the email address in a free-text column.
 `semantic.blocking_index` stores blocking keys built as
 `concat("email:", normalized_email)` (`jobs/spark/entity_backfill.py:373`) and
 `concat("phone:", normalized_phone)` (`:391`). The table is, in effect, an index
@@ -116,7 +119,7 @@ Five classes cover the direct identifiers:
 | Class | Columns it covers | Normalizer |
 |-------|-------------------|------------|
 | `email` | Shopify `email`, HubSpot `email`, Stripe `receipt_email`, Mailchimp `email_normalized`, GA4 `user_id` | `lower(trim(v))` |
-| `phone` | Shopify `phone`, HubSpot `phone` and `mobile_phone` | `regexp_replace(v, '[^0-9+]', '')` |
+| `phone` | Shopify `phone`, Stripe `phone`, HubSpot `phone` and `mobile_phone`, Mailchimp `phone_normalized` | `regexp_replace(v, '[^0-9+]', '')`, then `NULL` if shorter than 7 characters |
 | `name` | `first_name`, `last_name`, `full_name` | `lower(trim(v))` |
 | `address` | `address_line1`, `address_line2`, HubSpot `address` | `lower(trim(v))` |
 | `name_prefix` | Derived from `last_name` for blocking only | `lower(substring(v, 1, 3))` |
@@ -200,6 +203,13 @@ simply become separate customers.
 `NULL` and empty string map to `NULL`, never to a token. Tokenizing `NULL` would
 collapse every customer with a missing email into a single shared token and
 fabricate matches between unrelated people.
+
+The `phone` normalizer additionally returns `NULL` when the digit string is
+shorter than seven characters. Today that check lives in the blocking filters as
+`length(normalized_phone) >= 7` (`entity_backfill.py:388`, `:535`). Every token is
+36 characters wide, so leaving the check downstream turns it into a no-op and
+starts emitting blocking keys for the junk phone values it currently rejects.
+Validity checks must therefore run on plaintext, inside the normalizer.
 
 ### Ordering constraint
 
@@ -322,6 +332,8 @@ becomes simpler rather than more complex:
   `name_zip:<name_prefix_token>_<zip>`. `semantic.blocking_index` therefore stops
   storing plaintext entirely, closing the leak at `:373` and `:391`.
 - `zip` remains in the clear, so `name_zip` blocking continues to function.
+- `match_reason` becomes `concat("Matched via email token: ", email_token)`, which
+  removes the last plaintext column from `semantic.entity_index`.
 
 > [!NOTE]
 > An earlier draft of this design had entity resolution join the vault to recover
@@ -533,3 +545,6 @@ original draft. Recorded here as provenance.
 | 4 | Original phases 2 and 3 left `entity_backfill.py` reading a dropped column between commits | Merged into a single phase |
 | 5 | Multiple staging tables produce identical tokens, risking `MERGE_CARDINALITY_VIOLATION` | Added the mandatory `dropDuplicates(["token"])` before the vault merge |
 | 6 | `analytics.customer_metrics` carries `full_name` in addition to `email` | Corrected the rename table |
+| 7 | Phone blocking guards on `length(normalized_phone) >= 7`, but every token is 36 characters, making the guard a no-op | Moved the length check into the `phone` normalizer, which now returns `NULL` for short values |
+| 8 | `entity_index.match_reason` embeds the plaintext email (`:352`) | `match_reason` now carries the token; `entity_index` holds no plaintext |
+| 9 | The `phone` class column list omitted Stripe `phone` and Mailchimp `phone_normalized` | Completed the column list |
