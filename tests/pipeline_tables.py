@@ -121,6 +121,16 @@ RAW_TABLE_DDL = {
         value DOUBLE, session_id STRING, ga_session_number INT,
         _loaded_at TIMESTAMP, _source_file STRING
     """,
+    # Columns read by jobs/spark/staging_batch.py::stage_mailchimp_subscribers.
+    "mailchimp_subscribers": """
+        subscriber_id STRING, email_address STRING, email_type STRING,
+        status STRING, phone STRING, merge_fields STRING, stats STRING,
+        list_id STRING, tags STRING, ip_signup STRING,
+        timestamp_signup TIMESTAMP, ip_opt STRING, timestamp_opt TIMESTAMP,
+        last_changed TIMESTAMP, language STRING, vip BOOLEAN, source STRING,
+        sms_status STRING, _webhook_received_at TIMESTAMP,
+        _webhook_event_type STRING, _loaded_at TIMESTAMP
+    """,
 }
 
 # Tables the production jobs create themselves via CREATE TABLE IF NOT EXISTS.

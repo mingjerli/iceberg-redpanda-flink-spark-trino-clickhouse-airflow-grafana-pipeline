@@ -139,8 +139,8 @@ def stage_shopify_orders(spark: SparkSession, mode: str = "incremental"):
             order_id BIGINT,
             order_number BIGINT,
             customer_id BIGINT,
-            customer_email STRING,
-            customer_phone STRING,
+            customer_email_token STRING,
+            customer_phone_token STRING,
             order_name STRING,
             currency STRING,
             subtotal_price DECIMAL(18, 2),
@@ -271,9 +271,9 @@ def stage_shopify_orders(spark: SparkSession, mode: str = "incremental"):
         current_timestamp().alias("_staged_at")
     )
 
-    # No registered PII columns for this table (schemas/*.json is inconsistent
-    # for orders; see jobs/spark/pii/registry.py), so this is a safe no-op:
-    # tokenize_frame returns the frame unchanged and vault_df=None.
+    # customer_email/customer_phone are the order's contact PII (registered in
+    # pii/registry.py); tokenize_frame replaces them with customer_email_token/
+    # customer_phone_token and drops the plaintext.
     staged_df, vault_df = tokenize_frame(staged_df, "stg_shopify_orders", PII_TOKEN_PEPPER)
     upsert_vault(spark, vault_df)
 
@@ -1156,7 +1156,6 @@ def stage_mailchimp_subscribers(spark: SparkSession, mode: str = "incremental"):
     phone_col = trim(get_json_object(col("merge_fields"), "$.PHONE"))
 
     staged_df = deduped_df.select(
-        col("subscriber_id").alias("_raw_id"),
         col("subscriber_id"),
         col("email_address"),
         lower(trim(col("email_address"))).alias("email_normalized"),
@@ -1202,6 +1201,14 @@ def stage_mailchimp_subscribers(spark: SparkSession, mode: str = "incremental"):
     staged_df, vault_df = tokenize_frame(staged_df, "stg_mailchimp_subscribers", PII_TOKEN_PEPPER)
     upsert_vault(spark, vault_df)
 
+    # _raw_id is lineage back to the raw record, but subscriber_id is
+    # MD5(lower(email)) -- plaintext PII (pii/registry.py). Set it from the
+    # token, not the hash, so tracing a staging row back to
+    # raw.mailchimp_subscribers requires a privileged detokenize() call, same
+    # as every other PII column on this table. Lineage is not lost: the vault
+    # maps token -> the MD5, and raw's own id *is* that MD5.
+    staged_df = staged_df.withColumn("_raw_id", col("subscriber_id_token"))
+
     staged_df.write \
         .format("iceberg") \
         .mode("append") \
@@ -1219,7 +1226,7 @@ def stage_ga4_events(spark, mode="incremental"):
 
     spark.sql("""
         CREATE TABLE IF NOT EXISTS staging.stg_ga4_events (
-            client_id STRING, user_id STRING, session_id STRING, event_name STRING,
+            client_id STRING, user_id_token STRING, session_id STRING, event_name STRING,
             event_timestamp TIMESTAMP, page_location STRING, page_title STRING,
             page_referrer STRING, engagement_time_ms BIGINT, traffic_source STRING,
             traffic_medium STRING, traffic_campaign STRING, device_category STRING,
@@ -1268,8 +1275,10 @@ def stage_ga4_events(spark, mode="incremental"):
         col("_raw_id"), col("_loaded_at"), current_timestamp().alias("_staged_at")
     )
 
-    # No registered PII columns for this table (stg_ga4_sessions carries the
-    # tokenized user_id downstream, in compute_ga4_sessions); safe no-op here.
+    # user_id is the customer's email in this demo (see pii/registry.py) and is
+    # tokenized here, at the events layer -- not downstream in
+    # compute_ga4_sessions, which reads user_id_token straight through without
+    # re-tokenizing it. Tokenizing twice would hash an already-tokenized value.
     staged_df, vault_df = tokenize_frame(staged_df, "stg_ga4_events", PII_TOKEN_PEPPER)
     upsert_vault(spark, vault_df)
 
@@ -1324,7 +1333,7 @@ def compute_ga4_sessions(spark, mode="incremental"):
 
     sessions = events.groupBy("client_id", "sess_num").agg(
         coalesce(first("session_id"), concat(col("client_id"), lit("_"), col("sess_num").cast("string"))).alias("session_id"),
-        first("user_id").alias("user_id"), min("event_timestamp").alias("session_start"),
+        first("user_id_token").alias("user_id_token"), min("event_timestamp").alias("session_start"),
         max("event_timestamp").alias("session_end"),
         (unix_timestamp(max("event_timestamp")) - unix_timestamp(min("event_timestamp"))).cast("int").alias("session_duration_sec"),
         count("*").alias("event_count"),
@@ -1357,6 +1366,11 @@ def compute_ga4_sessions(spark, mode="incremental"):
         .withColumn("_staged_at", current_timestamp()) \
         .drop("t_src", "t_med", "t_camp", "d_cat", "d_os", "g_cty", "g_reg", "land", "exit", "sess_num")
 
+    # No registered PII columns for stg_ga4_sessions: user_id was already
+    # tokenized upstream in stage_ga4_events (see pii/registry.py), and the
+    # groupBy above reads user_id_token straight through as `first(...)`
+    # rather than re-deriving it, so this call is a genuine no-op -- kept for
+    # uniformity with every other staging function.
     sessions, vault_df = tokenize_frame(sessions, "stg_ga4_sessions", PII_TOKEN_PEPPER)
     upsert_vault(spark, vault_df)
 

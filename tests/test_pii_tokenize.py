@@ -121,11 +121,16 @@ def test_full_name_token_is_the_token_of_the_joined_plaintext(spark):
 
 def test_tokenize_frame_gives_same_email_token_across_sources(spark):
     """Shopify email and GA4 user_id are the same person; class-keyed tokens
-    must agree or cross-source entity resolution stops matching."""
+    must agree or cross-source entity resolution stops matching.
+
+    GA4 user_id is registered on stg_ga4_events, not stg_ga4_sessions:
+    compute_ga4_sessions reads user_id_token straight through from events
+    rather than re-deriving it, so stg_ga4_sessions has no registry entry of
+    its own (see pii/registry.py)."""
     shopify = spark.createDataFrame([Row(customer_id="1", email="ada@example.com")])
-    ga4 = spark.createDataFrame([Row(session_id="s1", user_id="ada@example.com")])
+    ga4 = spark.createDataFrame([Row(event_id="e1", user_id="ada@example.com")])
 
     shopify_token = tokenize_frame(shopify, "stg_shopify_customers", PEPPER)[0].collect()[0]["email_token"]
-    ga4_token = tokenize_frame(ga4, "stg_ga4_sessions", PEPPER)[0].collect()[0]["user_id_token"]
+    ga4_token = tokenize_frame(ga4, "stg_ga4_events", PEPPER)[0].collect()[0]["user_id_token"]
 
     assert shopify_token == ga4_token

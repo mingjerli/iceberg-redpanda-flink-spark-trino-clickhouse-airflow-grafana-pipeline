@@ -33,6 +33,10 @@ PII_CLASSES = (EMAIL, PHONE, NAME, ADDRESS, NAME_PREFIX, MAILCHIMP_ID)
 # Staging table -> {column: pii_class}. Column lists verified against the
 # CREATE TABLE statements in jobs/spark/staging_batch.py.
 PII_FIELDS = {
+    "stg_shopify_orders": {
+        "customer_email": EMAIL,
+        "customer_phone": PHONE,
+    },
     "stg_shopify_customers": {
         "email": EMAIL,
         "first_name": NAME,
@@ -88,8 +92,15 @@ PII_FIELDS = {
         "email_normalized": EMAIL,
     },
     # GA4 user_id is set to the customer's email for the demo's entity
-    # resolution (entity_backfill.py:251), so it carries class email.
-    "stg_ga4_sessions": {
+    # resolution (entity_backfill.py:251), so it carries class email. It is
+    # tokenized here, at the events layer, because compute_ga4_sessions derives
+    # stg_ga4_sessions from stg_ga4_events by reading user_id straight through
+    # (staging_batch.py::compute_ga4_sessions). Registering it a second time on
+    # stg_ga4_sessions would hash an already-tokenized value --
+    # token(token(email)) -- silently breaking every GA4 cross-source match.
+    # stg_ga4_sessions carries the result through unchanged as user_id_token,
+    # so it deliberately has no entry of its own here.
+    "stg_ga4_events": {
         "user_id": EMAIL,
     },
 }
