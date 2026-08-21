@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from pii.registry import PII_CLASSES, PII_FIELDS, derived_columns, pii_columns, token_column
+from pii.registry import PII_CLASSES, PII_DERIVED, PII_FIELDS, derived_columns, pii_columns, token_column
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -45,6 +45,18 @@ DDL_COLUMN = re.compile(
     re.MULTILINE,
 )
 
+# core_views.py declares its tables as CREATE TABLE ... AS SELECT ... AS alias,
+# not typed `column TYPE,` DDL -- DDL_COLUMN structurally cannot see it (zero
+# matches, confirmed). This catches the `AS alias` column list of a CTAS
+# SELECT. [ \t]+ / [ \t]* (not \s) keep the match on one line: \s spans
+# newlines, which let `CREATE VIEW ... AS\nSELECT` match with alias="SELECT"
+# during development -- a real cross-line false-positive risk, not a
+# hypothetical one. Requiring end-of-line after the captured word also means
+# `CAST(x AS DECIMAL(18, 2))` and `CAST(x AS BIGINT)` never match: `AS` there
+# is followed by `)`, not `,`/EOL, so the regex backtracks to the real
+# trailing `AS alias,` on the same line instead.
+CTAS_ALIAS = re.compile(r"\bAS[ \t]+(\w+)[ \t]*,?[ \t]*$", re.MULTILINE)
+
 
 def test_every_registry_entry_uses_a_known_class():
     for table, mapping in PII_FIELDS.items():
@@ -68,10 +80,16 @@ def test_token_column_naming_is_consistent():
 def test_forbidden_set_covers_every_registry_column():
     """Cross-check: every bare PII column name the registry knows about must be
     in FORBIDDEN, or the ratchet below could silently miss a reintroduced
-    plaintext column just because nobody remembered to list it."""
+    plaintext column just because nobody remembered to list it.
+
+    Iterates the union of PII_FIELDS and PII_DERIVED table keys, not just
+    PII_FIELDS -- today every PII_DERIVED table also has a PII_FIELDS entry,
+    but that's a coincidence of the current registry, not a guarantee. A
+    future PII_DERIVED-only table would be silently skipped by `for table in
+    PII_FIELDS`."""
     registry_columns = set()
-    for table, mapping in PII_FIELDS.items():
-        registry_columns.update(mapping.keys())
+    for table in set(PII_FIELDS) | set(PII_DERIVED):
+        registry_columns.update(pii_columns(table).keys())
         for new_column, (source_column, _pii_class) in derived_columns(table).items():
             registry_columns.add(source_column)
             registry_columns.add(new_column)
@@ -82,13 +100,22 @@ def test_forbidden_set_covers_every_registry_column():
 
 
 def test_no_bare_pii_column_below_the_staging_boundary():
-    """The ratchet. A plaintext column here means masking is cosmetic."""
+    """The ratchet. A plaintext column here means masking is cosmetic.
+
+    Two independent patterns, because the guarded files use two different
+    column-declaration styles: DDL_COLUMN for typed `column TYPE,` CREATE
+    TABLE statements (staging_batch.py, analytics_incremental.py,
+    marts_incremental.py, init-analytics.sql), CTAS_ALIAS for the `AS alias`
+    columns of core_views.py's `CREATE TABLE ... AS SELECT` views, which
+    DDL_COLUMN cannot see at all -- it declares no typed columns, only SELECT
+    aliases."""
     violations = []
     for path in GUARDED_SOURCES:
         text = path.read_text()
-        for match in DDL_COLUMN.finditer(text):
-            column = match.group(1)
-            if column in FORBIDDEN:
-                line = text[: match.start()].count("\n") + 1
-                violations.append(f"{path.relative_to(ROOT)}:{line} declares `{column}`")
+        for pattern in (DDL_COLUMN, CTAS_ALIAS):
+            for match in pattern.finditer(text):
+                column = match.group(1)
+                if column in FORBIDDEN:
+                    line = text[: match.start()].count("\n") + 1
+                    violations.append(f"{path.relative_to(ROOT)}:{line} declares `{column}`")
     assert not violations, "Plaintext PII columns below staging:\n" + "\n".join(violations)
