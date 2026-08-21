@@ -16,12 +16,27 @@ from __future__ import annotations
 
 import logging
 
-from pyspark.sql import Row
 from pyspark.sql.types import IntegerType, StringType, StructField, StructType
 
 logger = logging.getLogger(__name__)
 
 VAULT_TABLE = "iceberg.semantic.pii_vault"
+
+# Single ordered definition ensures schema and row projections cannot drift.
+# Both are derived from this tuple, so field order stays synchronized.
+VAULT_COLUMNS = (
+    ("token", StringType(), False),
+    ("pii_class", StringType(), False),
+    ("plaintext", StringType(), False),
+    ("key_version", IntegerType(), True),
+    ("_first_source", StringType(), True),
+)
+
+VAULT_COLUMN_NAMES = tuple(name for name, _, _ in VAULT_COLUMNS)
+
+TARGET_SCHEMA = StructType([
+    StructField(name, dtype, nullable) for name, dtype, nullable in VAULT_COLUMNS
+])
 
 VAULT_DDL = f"""
     CREATE TABLE IF NOT EXISTS {VAULT_TABLE} (
@@ -63,26 +78,13 @@ def upsert_vault(spark, vault_df):
     # Reconstruct with explicit non-nullable schema. tokenize_frame returns
     # nullable columns because token_expr and normalize return when().otherwise()
     # expressions which are nullable by construction; .where(token.isNotNull())
-    # filters rows but doesn't narrow schema nullability. Use named Row
-    # construction to map values by name, preventing silent column swaps if
-    # this list is reordered in future edits.
-    target_schema = StructType([
-        StructField("token", StringType(), False),
-        StructField("pii_class", StringType(), False),
-        StructField("plaintext", StringType(), False),
-        StructField("key_version", IntegerType(), True),
-        StructField("_first_source", StringType(), True),
-    ])
+    # filters rows but doesn't narrow schema nullability. Use VAULT_COLUMN_NAMES
+    # to derive a tuple that matches TARGET_SCHEMA's field order exactly.
+    # Both are derived from VAULT_COLUMNS, so they cannot drift apart.
+    rows = vault_df.dropDuplicates(["token"]) \
+        .rdd.map(lambda r: tuple(r[name] for name in VAULT_COLUMN_NAMES))
 
-    vault_df.dropDuplicates(["token"]) \
-        .rdd.map(lambda r: Row(
-            token=r["token"],
-            pii_class=r["pii_class"],
-            plaintext=r["plaintext"],
-            key_version=r["key_version"],
-            _first_source=r["_first_source"],
-        )) \
-        .toDF(schema=target_schema) \
+    spark.createDataFrame(rows, schema=TARGET_SCHEMA) \
         .createOrReplaceTempView("pii_vault_updates")
 
     spark.sql(f"""
