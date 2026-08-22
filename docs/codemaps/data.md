@@ -37,16 +37,18 @@
 
 **Common metadata:** `_raw_id STRING`, `_loaded_at TIMESTAMP`, `_staged_at TIMESTAMP`
 
-### Layer 2: Semantic (2-3 tables) — Spark entity_backfill.py
+### Layer 2: Semantic (4-5 tables) — Spark entity_backfill.py, jobs/spark/pii/
 
 | Table | Purpose | Partition |
 |-------|---------|-----------|
 | `semantic.entity_index` | Unified customer IDs across sources | entity_type |
 | `semantic.blocking_index` | Fuzzy matching keys for entity resolution | (blocking_key_type, entity_type) |
 | `semantic.entity_resolution_stats` | Quality metrics (optional) | months(started_at) |
+| `semantic.pii_vault` | Token -> plaintext map; holds all vaulted plaintext (`docs/DESIGN_PII_MASKING.md`) | pii_class |
+| `semantic.pii_access_log` | Audit log of `detokenize()` calls (tokens requested, never plaintext returned) | pii_class |
 
 **Entity sources:** shopify_customers, stripe_customers, hubspot_contacts, mailchimp_subscribers
-**Match types:** exact_email, exact_phone, fuzzy
+**Match types:** exact_email, new_entity
 
 ### Layer 3: Core (2 tables) — Spark core_views.py
 

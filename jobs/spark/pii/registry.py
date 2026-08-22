@@ -132,12 +132,3 @@ def derived_columns(table):
 def token_column(column):
     """Return the tokenized column name for a plaintext column."""
     return f"{column}_token"
-
-
-def all_token_columns():
-    """Every token column name the pipeline can emit, across all tables."""
-    names = set()
-    for table, mapping in PII_FIELDS.items():
-        names.update(token_column(c) for c in mapping)
-        names.update(token_column(c) for c in derived_columns(table))
-    return names

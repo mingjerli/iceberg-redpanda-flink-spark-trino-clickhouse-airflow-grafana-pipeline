@@ -76,7 +76,12 @@ def normalize(column, pii_class):
             length(digits) < MIN_PHONE_LENGTH, lit(None).cast("string")
         ).otherwise(digits)
     elif pii_class == NAME_PREFIX:
-        normalized = lower(substring(trim(source), 1, 3))
+        # No trim here, deliberately: entity_backfill.py's pre-tokenization
+        # blocking key was lower(substring(last_name, 1, 3)) with no trim
+        # (see git history prior to d544d0f), and design doc Section 4's
+        # normalizer table matches that. Adding a trim would change which
+        # token a whitespace-padded surname produces post-migration.
+        normalized = lower(substring(source, 1, 3))
     else:
         raise ValueError(f"Unknown PII class: {pii_class}")
 

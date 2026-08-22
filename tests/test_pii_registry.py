@@ -9,10 +9,13 @@ until someone reads the data.
 """
 from __future__ import annotations
 
+import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 from pii.registry import PII_CLASSES, PII_DERIVED, PII_FIELDS, derived_columns, pii_columns, token_column
+from tests.pipeline_tables import insert_rows
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -55,7 +58,7 @@ DDL_COLUMN = re.compile(
 # `CAST(x AS DECIMAL(18, 2))` and `CAST(x AS BIGINT)` never match: `AS` there
 # is followed by `)`, not `,`/EOL, so the regex backtracks to the real
 # trailing `AS alias,` on the same line instead.
-CTAS_ALIAS = re.compile(r"\bAS[ \t]+(\w+)[ \t]*,?[ \t]*$", re.MULTILINE)
+CTAS_ALIAS = re.compile(r"\bAS[ \t]+(\w+)[ \t]*,?[ \t]*$", re.MULTILINE | re.IGNORECASE)
 
 
 def test_every_registry_entry_uses_a_known_class():
@@ -119,3 +122,102 @@ def test_no_bare_pii_column_below_the_staging_boundary():
                     line = text[: match.start()].count("\n") + 1
                     violations.append(f"{path.relative_to(ROOT)}:{line} declares `{column}`")
     assert not violations, "Plaintext PII columns below staging:\n" + "\n".join(violations)
+
+
+# ---------------------------------------------------------------------------
+# Generalizing ratchet: values, not names.
+#
+# CRITICAL 1 in the PII masking fix wave found raw Mailchimp merge_fields JSON
+# carried into staging unchanged, sitting next to the first_name_token/
+# last_name_token/phone_token it was extracted and hashed into. The ratchet
+# above could never have caught it -- the offending column was called
+# merge_fields, not email/first_name/phone, so it was never a candidate for
+# FORBIDDEN. This test checks cell values instead of column names: after
+# tokenization, no value written to the vault as plaintext may also appear,
+# unmasked, in the staging row it came from -- whatever column holds it.
+# ---------------------------------------------------------------------------
+
+STAGED_AT = datetime(2026, 8, 21, 12, 0, 0)
+
+
+def test_no_staging_column_leaks_a_vaulted_plaintext_value(spark, pipeline_tables):
+    """Runs the real stage_mailchimp_subscribers -- the regression site -- and
+    asserts no cell in the resulting row equals a value semantic.pii_vault
+    holds as plaintext for this run. A value-based check catches the next
+    stray JSON blob regardless of what it is named."""
+    from jobs.spark.staging_batch import stage_mailchimp_subscribers
+
+    spark.sql("DROP TABLE IF EXISTS iceberg.staging.stg_mailchimp_subscribers")
+
+    insert_rows(spark, "iceberg.raw.mailchimp_subscribers", [{
+        "subscriber_id": "leak-check-subscriber",
+        "email_address": "leak.check@example.com",
+        "status": "subscribed",
+        "phone": "+15551234567",
+        "merge_fields": '{"FNAME": "Leakcheck", "LNAME": "Surname"}',
+        "stats": "{}",
+        "timestamp_signup": STAGED_AT,
+        "_loaded_at": STAGED_AT,
+    }])
+
+    stage_mailchimp_subscribers(spark, mode="full")
+
+    plaintext_values = {
+        row.plaintext
+        for row in spark.table("iceberg.semantic.pii_vault").select("plaintext").collect()
+    }
+    assert plaintext_values, "vault should hold at least the values just tokenized"
+
+    staged_row = spark.table("iceberg.staging.stg_mailchimp_subscribers").collect()[0]
+    leaked = [
+        column for column, value in staged_row.asDict().items()
+        if value is not None and str(value) in plaintext_values
+    ]
+    assert not leaked, (
+        f"staging.stg_mailchimp_subscribers leaks vaulted plaintext in columns: {leaked}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dashboards: the ratchet above only scans DDL/CTAS source files. A Grafana
+# panel selecting raw `email` was one of the three findings that motivated
+# this whole epic (docs/DESIGN_PII_MASKING.md Section 1) and was fixed by
+# hand with no regression test. These two guard monitoring/dashboards/*.json.
+# ---------------------------------------------------------------------------
+
+DASHBOARDS_DIR = ROOT / "monitoring" / "dashboards"
+
+RAW_LAYER_QUERY = re.compile(r"FROM\s+iceberg\.raw_", re.IGNORECASE)
+
+
+def _dashboard_sql_targets():
+    """Yield (path, panel_title, rawSql) for every SQL panel target."""
+    for path in sorted(DASHBOARDS_DIR.glob("*.json")):
+        doc = json.loads(path.read_text())
+        for panel in doc.get("panels", []):
+            for target in panel.get("targets", []):
+                raw_sql = target.get("rawSql")
+                if raw_sql:
+                    yield path, panel.get("title", "<untitled>"), raw_sql
+
+
+def test_dashboards_never_query_the_raw_layer():
+    """The original leak queried `FROM iceberg.raw_shopify_orders` directly."""
+    violations = [
+        f"{path.relative_to(ROOT)} panel {title!r}"
+        for path, title, raw_sql in _dashboard_sql_targets()
+        if RAW_LAYER_QUERY.search(raw_sql)
+    ]
+    assert not violations, "Dashboard panels query the raw layer:\n" + "\n".join(violations)
+
+
+def test_dashboards_never_select_a_forbidden_bare_column():
+    violations = [
+        f"{path.relative_to(ROOT)} panel {title!r} selects `{name}`"
+        for path, title, raw_sql in _dashboard_sql_targets()
+        for name in FORBIDDEN
+        if re.search(r"\b{}\b".format(re.escape(name)), raw_sql)
+    ]
+    assert not violations, (
+        "Dashboard panels select forbidden PII columns:\n" + "\n".join(violations)
+    )

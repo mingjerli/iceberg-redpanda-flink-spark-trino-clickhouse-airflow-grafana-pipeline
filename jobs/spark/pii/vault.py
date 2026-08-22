@@ -108,7 +108,7 @@ def lookup(spark, tokens):
     """Return vault rows for the given tokens. Unknown tokens yield no row."""
     create_vault(spark)
     if not tokens:
-        return spark.table(VAULT_TABLE).limit(0)
+        return spark.table(VAULT_TABLE).select("token", "pii_class", "plaintext").limit(0)
 
     quoted = ", ".join("'" + t.replace("'", "''") + "'" for t in tokens)
     return spark.sql(f"""

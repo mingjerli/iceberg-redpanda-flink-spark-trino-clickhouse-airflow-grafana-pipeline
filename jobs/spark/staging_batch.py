@@ -61,6 +61,8 @@ from pyspark.sql.functions import (
     when,
 )
 
+from metrics.pii_metrics import collect_null_rate_samples
+from metrics.pushgateway import push_samples
 from pii.tokenize import tokenize_frame
 from pii.vault import upsert_vault
 
@@ -76,6 +78,11 @@ logger = logging.getLogger(__name__)
 # even for a table with no registered PII, so this must be configured before
 # any staging function runs.
 PII_TOKEN_PEPPER = os.environ.get("PII_TOKEN_PEPPER", "")
+
+# Accumulates pipeline_pii_tokenization_null_rate samples across every
+# tokenize_frame() call in this process, pushed once in main()'s finally
+# block. A fresh list every spark-submit invocation -- no cross-run state.
+_PII_METRIC_SAMPLES = []
 
 
 def create_spark_session() -> SparkSession:
@@ -276,6 +283,7 @@ def stage_shopify_orders(spark: SparkSession, mode: str = "incremental"):
     # customer_phone_token and drops the plaintext.
     staged_df, vault_df = tokenize_frame(staged_df, "stg_shopify_orders", PII_TOKEN_PEPPER)
     upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_shopify_orders"))
 
     # Write to staging
     staged_df.write \
@@ -409,6 +417,7 @@ def stage_shopify_customers(spark: SparkSession, mode: str = "incremental"):
 
     staged_df, vault_df = tokenize_frame(staged_df, "stg_shopify_customers", PII_TOKEN_PEPPER)
     upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_shopify_customers"))
 
     # Write to staging
     staged_df.write \
@@ -560,6 +569,7 @@ def stage_stripe_charges(spark: SparkSession, mode: str = "incremental"):
 
     staged_df, vault_df = tokenize_frame(staged_df, "stg_stripe_charges", PII_TOKEN_PEPPER)
     upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_stripe_charges"))
 
     # Write to staging
     staged_df.write \
@@ -680,6 +690,7 @@ def stage_stripe_customers(spark: SparkSession, mode: str = "incremental"):
 
     staged_df, vault_df = tokenize_frame(staged_df, "stg_stripe_customers", PII_TOKEN_PEPPER)
     upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_stripe_customers"))
 
     # Write to staging
     staged_df.write \
@@ -868,6 +879,7 @@ def stage_hubspot_contacts(spark: SparkSession, mode: str = "incremental"):
 
     staged_df, vault_df = tokenize_frame(staged_df, "stg_hubspot_contacts", PII_TOKEN_PEPPER)
     upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_hubspot_contacts"))
 
     # Write to staging
     staged_df.write \
@@ -978,6 +990,7 @@ def stage_mailchimp_campaigns(spark: SparkSession, mode: str = "incremental"):
     # no-op here.
     staged_df, vault_df = tokenize_frame(staged_df, "stg_mailchimp_campaigns", PII_TOKEN_PEPPER)
     upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_mailchimp_campaigns"))
 
     staged_df.write \
         .format("iceberg") \
@@ -1068,6 +1081,7 @@ def stage_mailchimp_events(spark: SparkSession, mode: str = "incremental"):
 
     staged_df, vault_df = tokenize_frame(staged_df, "stg_mailchimp_events", PII_TOKEN_PEPPER)
     upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_mailchimp_events"))
 
     staged_df.write \
         .format("iceberg") \
@@ -1097,7 +1111,6 @@ def stage_mailchimp_subscribers(spark: SparkSession, mode: str = "incremental"):
             last_name_prefix_token STRING,
             phone_token STRING,
             phone_normalized_token STRING,
-            merge_fields STRING,
             stats STRING,
             avg_open_rate DECIMAL(5, 4),
             avg_click_rate DECIMAL(5, 4),
@@ -1174,7 +1187,6 @@ def stage_mailchimp_subscribers(spark: SparkSession, mode: str = "incremental"):
             coalesce(col("phone"), phone_col, lit("")),
             "[^0-9+]", ""
         ).alias("phone_normalized"),
-        col("merge_fields"),
         col("stats"),
         get_json_object(col("stats"), "$.avg_open_rate").cast("decimal(5,4)").alias("avg_open_rate"),
         get_json_object(col("stats"), "$.avg_click_rate").cast("decimal(5,4)").alias("avg_click_rate"),
@@ -1200,6 +1212,7 @@ def stage_mailchimp_subscribers(spark: SparkSession, mode: str = "incremental"):
 
     staged_df, vault_df = tokenize_frame(staged_df, "stg_mailchimp_subscribers", PII_TOKEN_PEPPER)
     upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_mailchimp_subscribers"))
 
     # _raw_id is lineage back to the raw record, but subscriber_id is
     # MD5(lower(email)) -- plaintext PII (pii/registry.py). Set it from the
@@ -1281,6 +1294,7 @@ def stage_ga4_events(spark, mode="incremental"):
     # re-tokenizing it. Tokenizing twice would hash an already-tokenized value.
     staged_df, vault_df = tokenize_frame(staged_df, "stg_ga4_events", PII_TOKEN_PEPPER)
     upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_ga4_events"))
 
     if mode == "full":
         staged_df.writeTo("iceberg.staging.stg_ga4_events").using("iceberg").createOrReplace()
@@ -1373,6 +1387,7 @@ def compute_ga4_sessions(spark, mode="incremental"):
     # uniformity with every other staging function.
     sessions, vault_df = tokenize_frame(sessions, "stg_ga4_sessions", PII_TOKEN_PEPPER)
     upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(sessions, "stg_ga4_sessions"))
 
     # Full recomputation regardless of mode: the read above is unfiltered,
     # so this must replace rather than append. Appending a complete
@@ -1444,6 +1459,19 @@ def main():
         logger.info(f"Staging batch job completed. Total records processed: {total_records}")
 
     finally:
+        # Namespaced by table so one Airflow task's push does not clobber
+        # another's: Pushgateway replaces a group's samples per (job,
+        # instance), and Airflow runs each table as its own spark-submit
+        # invocation with the same job="staging_batch" otherwise.
+        if _PII_METRIC_SAMPLES:
+            push_job = (
+                "staging_batch" if args.table == "all" else f"staging_batch_{args.table}"
+            )
+            try:
+                push_samples(_PII_METRIC_SAMPLES, job=push_job)
+            except Exception as exc:
+                # Never fail the staging job over metrics.
+                logger.warning(f"Could not push PII tokenization metrics: {exc}")
         spark.stop()
 
 

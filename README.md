@@ -408,7 +408,7 @@ docker exec -it iceberg-spark-master /opt/spark/bin/spark-sql \
 |-------|-------------|--------|
 | **Raw** | Append-only source events | `raw.shopify_orders`, `raw.shopify_customers`, `raw.stripe_charges`, `raw.stripe_customers`, `raw.hubspot_contacts`, `raw.mailchimp_campaigns`, `raw.mailchimp_events`, `raw.mailchimp_subscribers`, `raw.ga4_events` |
 | **Staging** | Cleaned and typed data | `staging.stg_shopify_orders`, `staging.stg_shopify_customers`, `staging.stg_stripe_charges`, `staging.stg_stripe_customers`, `staging.stg_hubspot_contacts`, `staging.stg_mailchimp_campaigns`, `staging.stg_mailchimp_events`, `staging.stg_mailchimp_subscribers`, `staging.stg_ga4_events`, `staging.stg_ga4_sessions` |
-| **Semantic** | Entity resolution | `semantic.entity_index`, `semantic.blocking_index` |
+| **Semantic** | Entity resolution, PII vault | `semantic.entity_index`, `semantic.blocking_index`, `semantic.pii_vault`, `semantic.pii_access_log` |
 | **Analytics** | Aggregated metrics | `analytics.customer_metrics`, `analytics.order_summary`, `analytics.payment_metrics`, `analytics.campaign_metrics`, `analytics.ga4_engagement_metrics`, `analytics.ga4_engagement_by_channel`, `analytics.ga4_page_performance`, `analytics.ga4_funnel_analysis` |
 | **Marts** | Business-ready views | `marts.customer_360`, `marts.sales_dashboard_daily`, `marts.campaign_dashboard`, `marts.ga4_engagement_dashboard` |
 
@@ -419,14 +419,19 @@ exports from the volume mounted at `/opt/spark/data`.
 ### PII Masking
 
 Direct identifiers (email, phone, name, address) are tokenized at the staging
-boundary. `raw.*` retains plaintext by design -- staging.* and every layer
-below it (semantic, core, analytics, marts, ClickHouse, Grafana) hold only
-deterministic tokens such as `email_token`, never the plaintext column. Only
-`semantic.pii_vault` maps a token back to plaintext, and the only path to it
-is the audited `detokenize()` call documented in
-`docs/RUNBOOK.md`. See `docs/DESIGN_PII_MASKING.md` for the full design,
-including what this demonstration does not defend against (raw-layer access,
-a leaked pepper) -- collected in that doc's Production Gaps table.
+boundary. `raw.*` retains plaintext by design -- `staging.*` and every layer
+built from it (semantic, core, analytics, marts) hold only deterministic
+tokens such as `email_token`, never the plaintext column. `semantic.pii_vault`
+maps a token back to plaintext, and `detokenize()` (`docs/RUNBOOK.md`) is the
+only *audited* path to it -- but not the only path that can reach it: Trino
+and any Spark job can query `semantic.pii_vault` directly, since this demo
+applies no catalog-level access control. ClickHouse and Grafana carry the
+same gap one layer up, on `raw.*` itself: `infrastructure/clickhouse/iceberg_setup.sql`
+publishes `iceberg.raw_*` views that read raw Iceberg tables unmodified, so
+plaintext is reachable there too, not just through Spark or Trino. See
+`docs/DESIGN_PII_MASKING.md` for the full design, including what this
+demonstration does not defend against -- collected in that doc's Production
+Gaps table.
 
 Requires `PII_TOKEN_PEPPER` to be set in `infrastructure/.env` (see
 `.env.example`); every staging job fails immediately without it.

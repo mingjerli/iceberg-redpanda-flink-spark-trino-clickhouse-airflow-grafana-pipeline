@@ -36,7 +36,13 @@ CREATE TABLE IF NOT EXISTS staging.stg_mailchimp_subscribers (
     phone_normalized_token          STRING          COMMENT 'Tokenized digits-only phone for entity resolution matching (class: phone)',
 
     -- Raw JSON fields (preserved for downstream flexibility)
-    merge_fields                    STRING          COMMENT 'All merge fields as JSON',
+    -- merge_fields (FNAME/LNAME/PHONE) is intentionally NOT carried into staging:
+    -- its three fields are already extracted and tokenized above as
+    -- first_name_token/last_name_token/phone_token, and the raw JSON blob held
+    -- the same values in the clear. Keeping it would have put a plaintext<->token
+    -- dictionary for the name and phone classes one column over from their
+    -- tokens (CRITICAL 1, PII masking fix wave). Lineage back to the raw JSON
+    -- is not lost: raw.mailchimp_subscribers.merge_fields still has it.
     stats                           STRING          COMMENT 'Engagement stats as JSON',
 
     -- Extracted stats

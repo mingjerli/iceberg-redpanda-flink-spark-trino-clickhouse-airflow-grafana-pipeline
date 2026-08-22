@@ -73,7 +73,7 @@ therefore does not derive policy from those files; see
 | Boundary | Tokenize at the staging boundary | Only `raw.*` and the vault hold plaintext |
 | Entity resolution | Operates entirely on tokens, no vault access | Exact-token matching reproduces current behavior exactly |
 | Field scope | Direct identifiers only | Keeps `city`, `state`, `country`, and `zip` usable for geo analytics |
-| Detokenization | Spark-only, audited | No Trino, ClickHouse, or Grafana path to plaintext |
+| Detokenization | Spark-only, audited | `detokenize()` is the only *audited* path; Trino and any Spark job can still read `semantic.pii_vault` directly (see Section 9) |
 
 ---
 
@@ -160,6 +160,18 @@ remain useful for geographic analysis, and they are weak identifiers in isolatio
 well-established re-identification vector. A production deployment handling a real
 population should tokenize `zip` and emit a truncated `zip3` column for analytics
 instead.
+
+`stg_mailchimp_campaigns.from_name`, `from_email`, and `reply_to`
+(`staging_batch.py:908-910`, `:959-961`) also stay in the clear, and are not in
+the registry at all. These are not data-subject identifiers the way a
+customer's own name or email is: they are the sending business's own contact
+details, already published in the body of every campaign email by design, to
+every recipient. Tokenizing them would not protect anyone's privacy -- the
+values are not secret, Mailchimp's own dashboard shows them in plaintext to
+anyone who can view a campaign -- and it would make campaign reporting
+(`analytics.campaign_metrics`, the `batch_business` dashboard) unreadable for
+no privacy gain, since an operator legitimately needs to know which sender
+address a campaign went out under.
 
 ### Why `name_prefix` exists
 
@@ -426,7 +438,20 @@ The log records the tokens requested and never the plaintext returned. Logging t
 returned values would turn the audit table into a second unguarded PII store, which
 is a common way this pattern is implemented incorrectly.
 
-No Trino or ClickHouse path to the vault exists.
+`detokenize()` is the only **audited** path from a token back to plaintext --
+every call it makes is logged to `semantic.pii_access_log`. It is not the only
+path that can *reach* the vault. `infrastructure/trino/catalog/iceberg.properties`
+mounts the entire Iceberg REST catalog with no schema filter and no access
+control, so `SELECT plaintext FROM iceberg.semantic.pii_vault` also works from
+the Trino CLI the README advertises, unaudited, bypassing `detokenize()`
+entirely -- and any Spark job with catalog access can do the same by reading
+the table directly. This is a documented gap, not an oversight: see
+[Production Gaps](#production-gaps).
+
+Separately, ClickHouse and Grafana have no route to the vault itself --
+`infrastructure/clickhouse/iceberg_setup.sql` publishes no `semantic.*`
+view -- but they do reach `raw.*` plaintext directly, through the
+`iceberg.raw_*` views the same file publishes (Section 3).
 
 **Production note:** `actor` and `reason` are self-reported by the calling job. A
 production deployment must bind `actor` to an authenticated identity rather than
@@ -488,17 +513,30 @@ invisible because unmatched records are not errors.
 The order matters, and step 4 is the step most easily forgotten:
 
 1. Deploy the code with tokenization enabled.
-2. Run `staging_batch.py --mode full` to re-tokenize all data and populate the
-   vault.
+2. Drop every staging table with `DROP TABLE ... PURGE` (`PURGE`, not a plain
+   `DROP TABLE` -- a plain drop removes the catalog entry but leaves the
+   pre-migration plaintext Parquet files sitting in MinIO) and run
+   `staging_batch.py --mode full` to recreate them, re-tokenize all data, and
+   populate the vault.
 3. Rebuild semantic, core, analytics, and marts in full.
-4. Run `expire_snapshots.py --retention-days 0` against every rewritten table.
+4. Run `expire_snapshots.py --retention-days 0 --retain-last 0
+   --remove-orphans --older-than "<now, UTC>"` against every rewritten table.
+   Both `--retain-last 0` and `--older-than` must be passed explicitly:
+   `RETAIN_LAST_N` defaults to 3, which keeps three pre-migration snapshots no
+   matter what `--retention-days` says, and `remove_orphan_files` defaults
+   `older_than` to three days ago, which leaves same-day orphan files (exactly
+   what this migration just produced) on disk. See `docs/RUNBOOK.md`'s
+   migration section for the exact commands.
 
 Without step 4, Iceberg time travel continues to serve the pre-migration snapshots
 containing plaintext, and the migration is cosmetic.
 
-**Production note:** Snapshot expiry removes the metadata pointers. Confirm that
-the underlying data files are also removed from MinIO, using `--remove-orphans`,
-before considering plaintext purged.
+**Production note:** Snapshot expiry removes the metadata pointers, and by
+default keeps 3 recent snapshots and skips orphan files less than three days
+old -- both wrong for a same-day migration purge. `--retain-last 0` and
+`--older-than` override those defaults; confirm with `--remove-orphans` that
+the underlying data files are also removed from MinIO before considering
+plaintext purged.
 
 ---
 
@@ -539,7 +577,7 @@ deployment must address all of them.
 | `zip` left in the clear | [4](#4-the-pii-registry) | Re-identification vector when combined with other attributes |
 | `actor` is self-reported, not authenticated | [9](#9-detokenization) | The audit trail is trust-based |
 | GA4 `user_id` is an email rather than an opaque ID | [4](#4-the-pii-registry) | Demonstration simplification, documented in `DESIGN_GA4.md:553` |
-| No Trino or ClickHouse access control | [3](#3-threat-model-and-guarantee) | Token columns are readable by any consumer |
+| No Trino or ClickHouse access control | [3](#3-threat-model-and-guarantee) | `raw.*` plaintext (via ClickHouse's `iceberg.raw_*` views and Trino) and `semantic.pii_vault` plaintext (via Trino or any Spark job) are readable by any consumer with catalog access, unaudited -- it is the plaintext that is exposed, not the token columns, which are meant to be readable everywhere below staging |
 | Not reviewed against any regulatory framework | Top | No compliance claim is made |
 
 ---
