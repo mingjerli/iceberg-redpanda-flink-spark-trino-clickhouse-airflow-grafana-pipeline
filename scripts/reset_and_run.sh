@@ -203,6 +203,38 @@ wait_for_service() {
     return 1
 }
 
+wait_for_raw_tables() {
+    # Flink writes the raw Iceberg tables on its first checkpoint commit, which
+    # is well after the jobs report as running and well after messages land in
+    # Redpanda. On a from-scratch run there is no pre-existing table, so the
+    # batch phase must wait for the commit rather than a fixed span.
+    local budget=${1:-180}
+    shift
+    local deadline=$(( SECONDS + budget ))
+    local missing table
+
+    echo -n "  Waiting for Flink to commit raw tables..."
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        missing=""
+        for table in "$@"; do
+            check_table_exists "raw" "$table" || missing="$missing $table"
+        done
+
+        if [ -z "$missing" ]; then
+            echo -e " ${GREEN}ready${NC}"
+            return 0
+        fi
+
+        echo -n "."
+        sleep 3
+    done
+
+    echo -e " ${RED}timeout${NC}"
+    log_fail "Raw tables never committed after ${budget}s:${missing}"
+    log_info "Flink creates these on its first checkpoint. Check http://localhost:8083"
+    return 1
+}
+
 check_table_exists() {
     local namespace=$1
     local table=$2
@@ -232,8 +264,25 @@ run_spark_job() {
 
     if [ "$status" -ne 0 ]; then
         log_fail "$description failed (exit $status)"
+
+        # The JVM stack trails the message that names the cause, so `tail`
+        # alone buries it -- that is why the original incident took several
+        # rounds to diagnose. Surface the exception lines first, then keep the
+        # whole log instead of deleting the only copy.
+        local exception
+        exception=$(grep -aE "^(Traceback|[A-Za-z_.]+(Error|Exception)[:( ])|Caused by:" "$job_log" | tail -10)
+        if [ -n "$exception" ]; then
+            echo "  ---- exception ----"
+            echo "$exception" | sed 's/^/  /'
+        fi
+
         echo "  ---- last 25 lines ----"
         tail -25 "$job_log" | sed 's/^/  /'
+
+        local kept="${SPARK_JOB_LOG_DIR:-/tmp}/spark-job-$(echo "$description" | tr -cs '[:alnum:]' '-').log"
+        if cp "$job_log" "$kept" 2>/dev/null; then
+            echo "  full log: $kept"
+        fi
         rm -f "$job_log"
         return 1
     fi
@@ -535,8 +584,11 @@ submit_flink_jobs() {
     echo ""
     log_warning "Flink jobs submitted in background"
     log_info "Monitor at: http://localhost:8083"
-    log_info "Waiting 60s for initial data processing..."
-    sleep 60
+    log_info "Waiting for Flink to commit the raw tables..."
+    wait_for_raw_tables "${RAW_TABLE_WAIT_SECONDS:-300}" \
+        shopify_orders shopify_customers stripe_charges stripe_customers \
+        hubspot_contacts mailchimp_campaigns mailchimp_events mailchimp_subscribers \
+        || return 1
 
     if [ "$VALIDATE_MODE" = true ]; then
         echo ""
@@ -1000,4 +1052,9 @@ main() {
     print_summary
 }
 
-main "$@"
+# Only run when executed, not when sourced. Sourcing used to run main(), whose
+# first act is removing every volume -- so `source reset_and_run.sh` to reach a
+# helper destroyed the environment. It also makes the helpers testable.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    main "$@"
+fi

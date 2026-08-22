@@ -24,7 +24,7 @@ from pyspark.sql.types import (
     StructType,
 )
 
-from pii.vault import lookup
+from pii.vault import ensure_namespace, lookup
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,7 @@ ACCESS_LOG_DDL = f"""
 
 def _record_access(spark, tokens, actor, reason, pii_class):
     """Append one audit row. Stores the tokens requested, never the plaintext."""
+    ensure_namespace(spark, "semantic")
     spark.sql(ACCESS_LOG_DDL)
 
     values = {
