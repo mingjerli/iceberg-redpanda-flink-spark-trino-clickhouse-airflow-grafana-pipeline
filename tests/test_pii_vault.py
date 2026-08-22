@@ -12,13 +12,40 @@ from __future__ import annotations
 from pyspark.sql import Row
 
 from pii.tokenize import tokenize_frame
-from pii.vault import VAULT_TABLE, create_vault, lookup, upsert_vault
+from pii.vault import VAULT_TABLE, create_vault, ensure_namespace, lookup, upsert_vault
 
 PEPPER = "test-pepper-do-not-use-in-production"
 
 
 def _shopify(spark, rows):
     return spark.createDataFrame([Row(**r) for r in rows])
+
+
+def test_ensure_namespace_is_idempotent_and_creates_when_missing(spark):
+    """`CREATE TABLE` does not create the namespace it targets. On the REST
+    catalog production uses, a missing namespace raises
+    NoSuchNamespaceException -- which shipped: on a cold start all 8 staging
+    jobs with registered PII died with `Namespace semantic does not exist`,
+    while the 2 without registered PII succeeded because those return from
+    upsert_vault before reaching the vault at all.
+
+    READ THIS BEFORE TRUSTING THIS TEST. It cannot reproduce that failure.
+    conftest registers the catalog as `type=hadoop`, which auto-creates a
+    namespace as a directory; production is `type=rest`, which does not. So
+    the whole class of missing-namespace bug is invisible to this suite no
+    matter how the test is written. What is asserted here is only that
+    ensure_namespace creates when absent and is safe to call repeatedly. The
+    production behaviour is verified by a from-scratch `reset_and_run.sh`.
+    """
+    spark.sql("DROP NAMESPACE IF EXISTS iceberg.pii_ns_probe CASCADE")
+
+    ensure_namespace(spark, "pii_ns_probe")
+    ensure_namespace(spark, "pii_ns_probe")  # must not raise on the second call
+
+    names = {row[0] for row in spark.sql("SHOW NAMESPACES IN iceberg").collect()}
+    assert "pii_ns_probe" in names, f"namespace not created; got {names}"
+
+    spark.sql("DROP NAMESPACE IF EXISTS iceberg.pii_ns_probe CASCADE")
 
 
 def test_upsert_inserts_new_tokens(spark):

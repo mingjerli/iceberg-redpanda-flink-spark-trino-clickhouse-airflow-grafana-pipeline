@@ -56,8 +56,22 @@ VAULT_DDL = f"""
 """
 
 
+def ensure_namespace(spark, namespace):
+    """Create an Iceberg namespace if it is absent.
+
+    CREATE TABLE does not create the namespace it targets. The REST catalog
+    production uses rejects a table in a missing namespace with
+    NoSuchNamespaceException; the hadoop catalog the tests use auto-creates one
+    as a directory, so the suite cannot catch this. It shipped that way: on a
+    cold start every staging job with registered PII died with
+    `Namespace semantic does not exist`.
+    """
+    spark.sql(f"CREATE NAMESPACE IF NOT EXISTS iceberg.{namespace}")
+
+
 def create_vault(spark):
     """Create semantic.pii_vault if it does not already exist."""
+    ensure_namespace(spark, "semantic")
     spark.sql(VAULT_DDL)
 
 
