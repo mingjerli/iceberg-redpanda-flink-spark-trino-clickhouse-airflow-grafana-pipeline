@@ -22,12 +22,16 @@ Usage:
     # Dry run
     spark-submit expire_snapshots.py --dry-run
 
-    # Purge every snapshot, e.g. to complete the PII tokenization migration
-    # (docs/RUNBOOK.md "Migrating Existing Data to Tokenized Columns"). Both
-    # --retain-last and --older-than must be passed explicitly: the defaults
-    # below exist to protect routine maintenance runs, and a migration purge
-    # is not one of those.
-    spark-submit expire_snapshots.py --retention-days 0 --retain-last 0 \
+    # Purge every plaintext snapshot, e.g. to complete the PII tokenization
+    # migration (docs/RUNBOOK.md "Migrating Existing Data to Tokenized
+    # Columns"). Both --retain-last and --older-than must be passed
+    # explicitly: the defaults below exist to protect routine maintenance
+    # runs, and a migration purge is not one of those. --retain-last 1, not
+    # 0: Iceberg's expire_snapshots procedure requires retain_last >= 1 and
+    # always keeps the current snapshot regardless, and after the migration's
+    # rebuild that current snapshot is the tokenized one, so 1 is the floor
+    # that still purges every pre-migration snapshot.
+    spark-submit expire_snapshots.py --retention-days 0 --retain-last 1 \
         --remove-orphans --older-than "2026-08-21 00:00:00"
 
 Configuration:
@@ -142,8 +146,11 @@ def expire_snapshots(
 
     retain_last is a floor: this many of the most recent snapshots are kept
     regardless of retention_days. It defaults to RETAIN_LAST_N so routine
-    maintenance runs are unaffected; pass 0 to make retention_days the only
-    limit, e.g. to purge pre-migration plaintext snapshots (docs/RUNBOOK.md).
+    maintenance runs are unaffected; pass 1 -- the minimum Iceberg's
+    expire_snapshots procedure accepts -- to lower that floor to just the
+    current snapshot, e.g. to purge pre-migration plaintext snapshots
+    (docs/RUNBOOK.md). `main()` clamps any lower value up to 1 before it
+    reaches this function.
     """
     logger.info(f"Processing table: {table_name}")
 
@@ -371,8 +378,11 @@ def main():
         default=RETAIN_LAST_N,
         help=(
             f"Minimum snapshots kept regardless of age (default: {RETAIN_LAST_N}). "
-            "Pass 0 with --retention-days 0 to make a table's snapshot history "
-            "fully expirable, e.g. for the PII tokenization migration purge."
+            "Pass 1 with --retention-days 0 to lower the floor to just the "
+            "current snapshot, e.g. for the PII tokenization migration purge. "
+            "Iceberg's expire_snapshots procedure requires at least 1 and "
+            "always keeps the current snapshot regardless; values below 1 "
+            "are clamped up to 1."
         ),
     )
     parser.add_argument(
@@ -391,6 +401,13 @@ def main():
         help="Show what would be expired without executing",
     )
     args = parser.parse_args()
+
+    if args.retain_last < 1:
+        logger.warning(
+            f"--retain-last {args.retain_last} is below Iceberg's minimum of 1 "
+            "(expire_snapshots always keeps the current snapshot); clamping to 1."
+        )
+        args.retain_last = 1
 
     logger.info(f"Starting Iceberg snapshot expiration (retention: {args.retention_days} days)")
     spark = create_spark_session()
@@ -416,8 +433,14 @@ def main():
             )
             results.append(result)
 
-            # Optionally remove orphan files
-            if args.remove_orphans and result.status == "success":
+            # Optionally remove orphan files. "skipped" (too few snapshots to
+            # expire any) is included alongside "success": a freshly recreated
+            # table -- e.g. staging right after the migration's DROP/rebuild --
+            # has fewer snapshots than the retain_last floor and always takes
+            # the early-return "skipped" branch in expire_snapshots(), so
+            # gating on "success" alone would mean its orphan files are never
+            # swept.
+            if args.remove_orphans and result.status in ("success", "skipped"):
                 remove_orphan_files(spark, table, args.dry_run, older_than=args.older_than)
 
         print_summary(results)

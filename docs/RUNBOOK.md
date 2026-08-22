@@ -452,10 +452,15 @@ way.
        --master spark://spark-master:7077 \
        # ... same catalog confs as above ...
        /opt/spark/jobs/maintenance/expire_snapshots.py \
-       --retention-days 0 --retain-last 0 --remove-orphans --older-than "$NOW"
+       --retention-days 0 --retain-last 1 --remove-orphans --older-than "$NOW"
    ```
-   - `--retain-last 0` removes the floor that otherwise keeps 3 pre-migration
+   - `--retain-last 1` lowers the floor that otherwise keeps 3 pre-migration
      snapshots (with their plaintext) no matter what `--retention-days` says.
+     Iceberg's `expire_snapshots` procedure always keeps the current snapshot
+     regardless of `retain_last` (`retain_last => 0` raises
+     `IllegalArgumentException`), and after step 3's rebuild that current
+     snapshot is the tokenized one -- so `--retain-last 1` still purges every
+     pre-migration, plaintext-bearing snapshot.
    - `--older-than "$NOW"` is required because `remove_orphan_files`
      defaults `older_than` to three days ago when the flag is omitted, which
      leaves same-day orphan files on disk -- exactly what this migration just

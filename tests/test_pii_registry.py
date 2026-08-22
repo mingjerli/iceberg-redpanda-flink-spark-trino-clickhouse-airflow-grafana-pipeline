@@ -140,11 +140,36 @@ def test_no_bare_pii_column_below_the_staging_boundary():
 STAGED_AT = datetime(2026, 8, 21, 12, 0, 0)
 
 
+# Exact `in` against a set is exact-membership, not containment, and it is
+# case-sensitive. The vault stores the *normalized* plaintext
+# (pii/tokenize.py normalize(): lower(trim(...)) for email/name/address,
+# digits-only for phone), so a reintroduced merge_fields value of
+# `{"FNAME": "Leakcheck", "LNAME": "Surname"}` equals none of the vault's
+# entries outright -- "Leakcheck" only ever appears as a substring, in its
+# original casing, inside a larger JSON string. A prior version of this test
+# used exact `in` against a set and would still pass with the column
+# reintroduced. This checks case-folded substring containment instead: fail
+# if any vaulted plaintext appears anywhere inside str(value).lower().
+#
+# MIN_LEAK_MATCH_LENGTH excludes PII_DERIVED's last_name_prefix plaintext
+# (pii/registry.py, pii/tokenize.py NAME_PREFIX: lower(substring(x, 1, 3)) --
+# always exactly 3 characters, e.g. "sur"). A 3-character needle matches
+# inside unrelated column values too often (ids, timestamps, free text) to be
+# a useful signal. Every other PII class here is comfortably longer: phone is
+# enforced >= MIN_PHONE_LENGTH (7) by tokenize.py before it ever reaches the
+# vault, and this fixture's email/name values are all >= 6 characters. 4 is
+# the smallest floor that clears the 3-character name_prefix while keeping
+# every other class's shortest realistic value in scope.
+MIN_LEAK_MATCH_LENGTH = 4
+
+
 def test_no_staging_column_leaks_a_vaulted_plaintext_value(spark, pipeline_tables):
     """Runs the real stage_mailchimp_subscribers -- the regression site -- and
-    asserts no cell in the resulting row equals a value semantic.pii_vault
-    holds as plaintext for this run. A value-based check catches the next
-    stray JSON blob regardless of what it is named."""
+    asserts no cell in the resulting row contains, as a case-folded
+    substring, a value semantic.pii_vault holds as plaintext for this run.
+    A substring-based check catches the next stray JSON blob regardless of
+    what it is named, what case it preserves, or where inside the value the
+    plaintext sits."""
     from jobs.spark.staging_batch import stage_mailchimp_subscribers
 
     spark.sql("DROP TABLE IF EXISTS iceberg.staging.stg_mailchimp_subscribers")
@@ -165,13 +190,25 @@ def test_no_staging_column_leaks_a_vaulted_plaintext_value(spark, pipeline_table
     plaintext_values = {
         row.plaintext
         for row in spark.table("iceberg.semantic.pii_vault").select("plaintext").collect()
+        if row.plaintext is not None
     }
     assert plaintext_values, "vault should hold at least the values just tokenized"
+
+    needles = {
+        value.lower() for value in plaintext_values
+        if len(value) >= MIN_LEAK_MATCH_LENGTH
+    }
+    assert needles, "vault should hold at least one plaintext value long enough to check"
 
     staged_row = spark.table("iceberg.staging.stg_mailchimp_subscribers").collect()[0]
     leaked = [
         column for column, value in staged_row.asDict().items()
-        if value is not None and str(value) in plaintext_values
+        if value is not None
+        # Token columns are the masked replacement, not a leak of the
+        # plaintext they were derived from -- excluded so the check flags
+        # the source of a leak, not its intended, hashed counterpart.
+        and not column.endswith("_token")
+        and any(needle in str(value).lower() for needle in needles)
     ]
     assert not leaked, (
         f"staging.stg_mailchimp_subscribers leaks vaulted plaintext in columns: {leaked}"

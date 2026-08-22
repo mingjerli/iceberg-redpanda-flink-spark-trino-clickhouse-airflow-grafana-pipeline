@@ -519,21 +519,25 @@ The order matters, and step 4 is the step most easily forgotten:
    `staging_batch.py --mode full` to recreate them, re-tokenize all data, and
    populate the vault.
 3. Rebuild semantic, core, analytics, and marts in full.
-4. Run `expire_snapshots.py --retention-days 0 --retain-last 0
+4. Run `expire_snapshots.py --retention-days 0 --retain-last 1
    --remove-orphans --older-than "<now, UTC>"` against every rewritten table.
-   Both `--retain-last 0` and `--older-than` must be passed explicitly:
+   Both `--retain-last 1` and `--older-than` must be passed explicitly:
    `RETAIN_LAST_N` defaults to 3, which keeps three pre-migration snapshots no
    matter what `--retention-days` says, and `remove_orphan_files` defaults
    `older_than` to three days ago, which leaves same-day orphan files (exactly
-   what this migration just produced) on disk. See `docs/RUNBOOK.md`'s
-   migration section for the exact commands.
+   what this migration just produced) on disk. `--retain-last 1` is the
+   correct floor, not 0: Iceberg's `expire_snapshots` procedure requires
+   `retain_last >= 1` and always keeps the current snapshot anyway, and after
+   step 3's rebuild that current snapshot is the tokenized one, so `1` still
+   purges every pre-migration, plaintext-bearing snapshot. See
+   `docs/RUNBOOK.md`'s migration section for the exact commands.
 
 Without step 4, Iceberg time travel continues to serve the pre-migration snapshots
 containing plaintext, and the migration is cosmetic.
 
 **Production note:** Snapshot expiry removes the metadata pointers, and by
 default keeps 3 recent snapshots and skips orphan files less than three days
-old -- both wrong for a same-day migration purge. `--retain-last 0` and
+old -- both wrong for a same-day migration purge. `--retain-last 1` and
 `--older-than` override those defaults; confirm with `--remove-orphans` that
 the underlying data files are also removed from MinIO before considering
 plaintext purged.
