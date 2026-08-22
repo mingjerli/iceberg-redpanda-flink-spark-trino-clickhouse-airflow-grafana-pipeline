@@ -17,6 +17,15 @@ from pathlib import Path
 from pyspark.sql import SparkSession
 import random
 
+# jobs/spark/staging_batch.py reads PII_TOKEN_PEPPER at import time
+# (jobs/spark/pii/tokenize.py::tokenize_frame raises ValueError on an empty
+# pepper for every staging table, including ones with no registered PII), so
+# a value must exist before staging_batch is first imported by any test.
+# run_tests.sh does not pass environment variables into the container, so this
+# is set here. This is a fixed test-only value, never used outside pytest --
+# production configuration goes through infrastructure/.env.example.
+os.environ.setdefault("PII_TOKEN_PEPPER", "test-pepper-do-not-use-in-production")
+
 # docker-compose mounts ../jobs/spark at /opt/spark/jobs, so the `spark` level
 # does not exist inside the container and `metrics` is a top-level package
 # there. Mirror that here so tests and spark-submit use the identical

@@ -111,6 +111,18 @@ PIPELINE_METRICS = (
         labels=("dag_id",),
         help="Wall-clock duration of the last completed pipeline DAG run",
     ),
+    MetricDef(
+        name="pipeline_pii_vault_entries",
+        kind="gauge",
+        labels=("pii_class",),
+        help="Distinct tokens stored in semantic.pii_vault, by PII class",
+    ),
+    MetricDef(
+        name="pipeline_pii_tokenization_null_rate",
+        kind="gauge",
+        labels=("table", "column"),
+        help="Fraction of rows whose PII column tokenized to NULL; a spike means a broken normalizer",
+    ),
 )
 
 # Metric families produced by third-party exporters we scrape directly.

@@ -61,12 +61,28 @@ from pyspark.sql.functions import (
     when,
 )
 
+from metrics.pii_metrics import collect_null_rate_samples
+from metrics.pushgateway import push_samples
+from pii.tokenize import tokenize_frame
+from pii.vault import upsert_vault
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Pepper for PII tokenization (jobs/spark/pii/tokenize.py). tokenize_frame()
+# raises ValueError on an empty pepper, refusing to emit unsalted tokens --
+# even for a table with no registered PII, so this must be configured before
+# any staging function runs.
+PII_TOKEN_PEPPER = os.environ.get("PII_TOKEN_PEPPER", "")
+
+# Accumulates pipeline_pii_tokenization_null_rate samples across every
+# tokenize_frame() call in this process, pushed once in main()'s finally
+# block. A fresh list every spark-submit invocation -- no cross-run state.
+_PII_METRIC_SAMPLES = []
 
 
 def create_spark_session() -> SparkSession:
@@ -130,8 +146,8 @@ def stage_shopify_orders(spark: SparkSession, mode: str = "incremental"):
             order_id BIGINT,
             order_number BIGINT,
             customer_id BIGINT,
-            customer_email STRING,
-            customer_phone STRING,
+            customer_email_token STRING,
+            customer_phone_token STRING,
             order_name STRING,
             currency STRING,
             subtotal_price DECIMAL(18, 2),
@@ -262,6 +278,13 @@ def stage_shopify_orders(spark: SparkSession, mode: str = "incremental"):
         current_timestamp().alias("_staged_at")
     )
 
+    # customer_email/customer_phone are the order's contact PII (registered in
+    # pii/registry.py); tokenize_frame replaces them with customer_email_token/
+    # customer_phone_token and drops the plaintext.
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_shopify_orders", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_shopify_orders"))
+
     # Write to staging
     staged_df.write \
         .format("iceberg") \
@@ -281,13 +304,14 @@ def stage_shopify_customers(spark: SparkSession, mode: str = "incremental"):
     spark.sql("""
         CREATE TABLE IF NOT EXISTS iceberg.staging.stg_shopify_customers (
             customer_id BIGINT,
-            email STRING,
-            first_name STRING,
-            last_name STRING,
-            full_name STRING,
-            phone STRING,
-            address_line1 STRING,
-            address_line2 STRING,
+            email_token STRING,
+            first_name_token STRING,
+            last_name_token STRING,
+            full_name_token STRING,
+            phone_token STRING,
+            last_name_prefix_token STRING,
+            address_line1_token STRING,
+            address_line2_token STRING,
             city STRING,
             province STRING,
             province_code STRING,
@@ -391,6 +415,10 @@ def stage_shopify_customers(spark: SparkSession, mode: str = "incremental"):
         current_timestamp().alias("_staged_at")
     )
 
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_shopify_customers", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_shopify_customers"))
+
     # Write to staging
     staged_df.write \
         .format("iceberg") \
@@ -425,9 +453,9 @@ def stage_stripe_charges(spark: SparkSession, mode: str = "incremental"):
             card_exp_year INT,
             card_funding STRING,
             card_country STRING,
-            billing_name STRING,
-            billing_email STRING,
-            billing_phone STRING,
+            billing_name_token STRING,
+            billing_email_token STRING,
+            billing_phone_token STRING,
             billing_city STRING,
             billing_country STRING,
             billing_postal_code STRING,
@@ -539,6 +567,10 @@ def stage_stripe_charges(spark: SparkSession, mode: str = "incremental"):
         current_timestamp().alias("_staged_at")
     )
 
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_stripe_charges", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_stripe_charges"))
+
     # Write to staging
     staged_df.write \
         .format("iceberg") \
@@ -558,20 +590,21 @@ def stage_stripe_customers(spark: SparkSession, mode: str = "incremental"):
     spark.sql("""
         CREATE TABLE IF NOT EXISTS iceberg.staging.stg_stripe_customers (
             customer_id STRING,
-            email STRING,
-            name STRING,
-            first_name STRING,
-            last_name STRING,
-            full_name STRING,
-            phone STRING,
-            address_line1 STRING,
-            address_line2 STRING,
+            email_token STRING,
+            name_token STRING,
+            first_name_token STRING,
+            last_name_token STRING,
+            full_name_token STRING,
+            phone_token STRING,
+            last_name_prefix_token STRING,
+            address_line1_token STRING,
+            address_line2_token STRING,
             city STRING,
             state STRING,
             postal_code STRING,
             country STRING,
-            shipping_name STRING,
-            shipping_address_line1 STRING,
+            shipping_name_token STRING,
+            shipping_address_line1_token STRING,
             shipping_city STRING,
             shipping_state STRING,
             shipping_postal_code STRING,
@@ -655,6 +688,10 @@ def stage_stripe_customers(spark: SparkSession, mode: str = "incremental"):
         current_timestamp().alias("_staged_at")
     )
 
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_stripe_customers", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_stripe_customers"))
+
     # Write to staging
     staged_df.write \
         .format("iceberg") \
@@ -674,13 +711,14 @@ def stage_hubspot_contacts(spark: SparkSession, mode: str = "incremental"):
     spark.sql("""
         CREATE TABLE IF NOT EXISTS iceberg.staging.stg_hubspot_contacts (
             contact_id STRING,
-            email STRING,
-            first_name STRING,
-            last_name STRING,
-            full_name STRING,
-            phone STRING,
-            mobile_phone STRING,
-            address STRING,
+            email_token STRING,
+            first_name_token STRING,
+            last_name_token STRING,
+            full_name_token STRING,
+            phone_token STRING,
+            mobile_phone_token STRING,
+            last_name_prefix_token STRING,
+            address_token STRING,
             city STRING,
             state STRING,
             zip STRING,
@@ -839,6 +877,10 @@ def stage_hubspot_contacts(spark: SparkSession, mode: str = "incremental"):
         col("contact_id").isNotNull()
     )
 
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_hubspot_contacts", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_hubspot_contacts"))
+
     # Write to staging
     staged_df.write \
         .format("iceberg") \
@@ -943,6 +985,13 @@ def stage_mailchimp_campaigns(spark: SparkSession, mode: str = "incremental"):
         current_timestamp().alias("_staged_at"),
     )
 
+    # No registered PII columns for this table (from_email/reply_to are the
+    # campaign sender, not a customer identifier); tokenize_frame is a safe
+    # no-op here.
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_mailchimp_campaigns", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_mailchimp_campaigns"))
+
     staged_df.write \
         .format("iceberg") \
         .mode("append") \
@@ -962,9 +1011,9 @@ def stage_mailchimp_events(spark: SparkSession, mode: str = "incremental"):
             _raw_id STRING,
             event_id STRING,
             campaign_id STRING,
-            email_id STRING,
-            email_address STRING,
-            email_normalized STRING,
+            email_id_token STRING,
+            email_address_token STRING,
+            email_normalized_token STRING,
             action STRING,
             event_timestamp TIMESTAMP,
             event_date DATE,
@@ -1030,6 +1079,10 @@ def stage_mailchimp_events(spark: SparkSession, mode: str = "incremental"):
         current_timestamp().alias("_staged_at"),
     )
 
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_mailchimp_events", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_mailchimp_events"))
+
     staged_df.write \
         .format("iceberg") \
         .mode("append") \
@@ -1047,17 +1100,17 @@ def stage_mailchimp_subscribers(spark: SparkSession, mode: str = "incremental"):
     spark.sql("""
         CREATE TABLE IF NOT EXISTS iceberg.staging.stg_mailchimp_subscribers (
             _raw_id STRING,
-            subscriber_id STRING,
-            email_address STRING,
-            email_normalized STRING,
+            subscriber_id_token STRING,
+            email_address_token STRING,
+            email_normalized_token STRING,
             email_type STRING,
             status STRING,
-            first_name STRING,
-            last_name STRING,
-            full_name STRING,
-            phone STRING,
-            phone_normalized STRING,
-            merge_fields STRING,
+            first_name_token STRING,
+            last_name_token STRING,
+            full_name_token STRING,
+            last_name_prefix_token STRING,
+            phone_token STRING,
+            phone_normalized_token STRING,
             stats STRING,
             avg_open_rate DECIMAL(5, 4),
             avg_click_rate DECIMAL(5, 4),
@@ -1116,7 +1169,6 @@ def stage_mailchimp_subscribers(spark: SparkSession, mode: str = "incremental"):
     phone_col = trim(get_json_object(col("merge_fields"), "$.PHONE"))
 
     staged_df = deduped_df.select(
-        col("subscriber_id").alias("_raw_id"),
         col("subscriber_id"),
         col("email_address"),
         lower(trim(col("email_address"))).alias("email_normalized"),
@@ -1135,7 +1187,6 @@ def stage_mailchimp_subscribers(spark: SparkSession, mode: str = "incremental"):
             coalesce(col("phone"), phone_col, lit("")),
             "[^0-9+]", ""
         ).alias("phone_normalized"),
-        col("merge_fields"),
         col("stats"),
         get_json_object(col("stats"), "$.avg_open_rate").cast("decimal(5,4)").alias("avg_open_rate"),
         get_json_object(col("stats"), "$.avg_click_rate").cast("decimal(5,4)").alias("avg_click_rate"),
@@ -1159,6 +1210,18 @@ def stage_mailchimp_subscribers(spark: SparkSession, mode: str = "incremental"):
         current_timestamp().alias("_staged_at"),
     )
 
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_mailchimp_subscribers", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_mailchimp_subscribers"))
+
+    # _raw_id is lineage back to the raw record, but subscriber_id is
+    # MD5(lower(email)) -- plaintext PII (pii/registry.py). Set it from the
+    # token, not the hash, so tracing a staging row back to
+    # raw.mailchimp_subscribers requires a privileged detokenize() call, same
+    # as every other PII column on this table. Lineage is not lost: the vault
+    # maps token -> the MD5, and raw's own id *is* that MD5.
+    staged_df = staged_df.withColumn("_raw_id", col("subscriber_id_token"))
+
     staged_df.write \
         .format("iceberg") \
         .mode("append") \
@@ -1176,7 +1239,7 @@ def stage_ga4_events(spark, mode="incremental"):
 
     spark.sql("""
         CREATE TABLE IF NOT EXISTS staging.stg_ga4_events (
-            client_id STRING, user_id STRING, session_id STRING, event_name STRING,
+            client_id STRING, user_id_token STRING, session_id STRING, event_name STRING,
             event_timestamp TIMESTAMP, page_location STRING, page_title STRING,
             page_referrer STRING, engagement_time_ms BIGINT, traffic_source STRING,
             traffic_medium STRING, traffic_campaign STRING, device_category STRING,
@@ -1225,6 +1288,14 @@ def stage_ga4_events(spark, mode="incremental"):
         col("_raw_id"), col("_loaded_at"), current_timestamp().alias("_staged_at")
     )
 
+    # user_id is the customer's email in this demo (see pii/registry.py) and is
+    # tokenized here, at the events layer -- not downstream in
+    # compute_ga4_sessions, which reads user_id_token straight through without
+    # re-tokenizing it. Tokenizing twice would hash an already-tokenized value.
+    staged_df, vault_df = tokenize_frame(staged_df, "stg_ga4_events", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(staged_df, "stg_ga4_events"))
+
     if mode == "full":
         staged_df.writeTo("iceberg.staging.stg_ga4_events").using("iceberg").createOrReplace()
     else:
@@ -1242,7 +1313,7 @@ def compute_ga4_sessions(spark, mode="incremental"):
 
     spark.sql("""
         CREATE TABLE IF NOT EXISTS staging.stg_ga4_sessions (
-            session_id STRING, client_id STRING, user_id STRING, session_start TIMESTAMP,
+            session_id STRING, client_id STRING, user_id_token STRING, session_start TIMESTAMP,
             session_end TIMESTAMP, session_duration_sec INT, event_count INT, page_view_count INT,
             is_engaged_session BOOLEAN, traffic_source STRING, traffic_medium STRING,
             traffic_campaign STRING, channel_group STRING, landing_page STRING, exit_page STRING,
@@ -1276,7 +1347,7 @@ def compute_ga4_sessions(spark, mode="incremental"):
 
     sessions = events.groupBy("client_id", "sess_num").agg(
         coalesce(first("session_id"), concat(col("client_id"), lit("_"), col("sess_num").cast("string"))).alias("session_id"),
-        first("user_id").alias("user_id"), min("event_timestamp").alias("session_start"),
+        first("user_id_token").alias("user_id_token"), min("event_timestamp").alias("session_start"),
         max("event_timestamp").alias("session_end"),
         (unix_timestamp(max("event_timestamp")) - unix_timestamp(min("event_timestamp"))).cast("int").alias("session_duration_sec"),
         count("*").alias("event_count"),
@@ -1308,6 +1379,15 @@ def compute_ga4_sessions(spark, mode="incremental"):
         .withColumn("is_bounce", (col("page_view_count") <= 1) & (~col("is_engaged_session"))) \
         .withColumn("_staged_at", current_timestamp()) \
         .drop("t_src", "t_med", "t_camp", "d_cat", "d_os", "g_cty", "g_reg", "land", "exit", "sess_num")
+
+    # No registered PII columns for stg_ga4_sessions: user_id was already
+    # tokenized upstream in stage_ga4_events (see pii/registry.py), and the
+    # groupBy above reads user_id_token straight through as `first(...)`
+    # rather than re-deriving it, so this call is a genuine no-op -- kept for
+    # uniformity with every other staging function.
+    sessions, vault_df = tokenize_frame(sessions, "stg_ga4_sessions", PII_TOKEN_PEPPER)
+    upsert_vault(spark, vault_df)
+    _PII_METRIC_SAMPLES.extend(collect_null_rate_samples(sessions, "stg_ga4_sessions"))
 
     # Full recomputation regardless of mode: the read above is unfiltered,
     # so this must replace rather than append. Appending a complete
@@ -1379,6 +1459,19 @@ def main():
         logger.info(f"Staging batch job completed. Total records processed: {total_records}")
 
     finally:
+        # Namespaced by table so one Airflow task's push does not clobber
+        # another's: Pushgateway replaces a group's samples per (job,
+        # instance), and Airflow runs each table as its own spark-submit
+        # invocation with the same job="staging_batch" otherwise.
+        if _PII_METRIC_SAMPLES:
+            push_job = (
+                "staging_batch" if args.table == "all" else f"staging_batch_{args.table}"
+            )
+            try:
+                push_samples(_PII_METRIC_SAMPLES, job=push_job)
+            except Exception as exc:
+                # Never fail the staging job over metrics.
+                logger.warning(f"Could not push PII tokenization metrics: {exc}")
         spark.stop()
 
 

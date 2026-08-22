@@ -133,8 +133,8 @@ def test_e2e_ga4_pipeline_full_flow(spark, pipeline_tables, ga4_export_dir):
                                         .count().filter(col("count") > 1).count()
     assert duplicate_sessions == 0, "Each session should appear once"
 
-    assert staged_sessions.filter(col("user_id").isNotNull()).count() > 0, \
-        "Should have some sessions with user_id"
+    assert staged_sessions.filter(col("user_id_token").isNotNull()).count() > 0, \
+        "Should have some sessions with user_id_token"
 
     # =========================================================================
     # STEP 5: Entity Resolution

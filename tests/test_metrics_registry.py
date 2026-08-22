@@ -25,9 +25,15 @@ from metrics.registry import (
     metric_names,
 )
 
-ALERTS_PATH = (
-    Path(__file__).resolve().parents[1] / "monitoring" / "alerts" / "iceberg_alerts.yaml"
-)
+ROOT = Path(__file__).resolve().parents[1]
+ALERTS_PATH = ROOT / "monitoring" / "alerts" / "iceberg_alerts.yaml"
+
+# Every location a metric this pipeline emits can actually be pushed from.
+# jobs/spark/**: every Spark batch/maintenance job and its metrics/ package.
+# airflow/dags/**: iceberg_pipeline_* is pushed from callbacks.py, which is
+# deliberately pure stdlib so it can run in the Airflow image (no pyspark) --
+# see the comment on those entries in metrics/registry.py.
+PRODUCER_ROOTS = (ROOT / "jobs" / "spark", ROOT / "airflow" / "dags")
 
 
 def alert_expressions() -> list[tuple[str, str]]:
@@ -126,3 +132,39 @@ def test_known_gaps_is_empty():
     assert KNOWN_GAPS == frozenset(), (
         f"Alerts still reference unproduced metrics: {sorted(KNOWN_GAPS)}"
     )
+
+
+def _producer_sources() -> str:
+    """Concatenated text of every file that could plausibly push a metric.
+
+    Excludes registry.py itself: declaring a name there is exactly the act
+    this test must not accept as a substitute for producing it.
+    """
+    chunks = []
+    for root in PRODUCER_ROOTS:
+        for path in sorted(root.rglob("*.py")):
+            if path.name == "registry.py":
+                continue
+            chunks.append(path.read_text())
+    return "\n".join(chunks)
+
+
+def test_every_registered_metric_has_a_push_site():
+    """
+    Registering a metric in PIPELINE_METRICS is not the same as producing it.
+    This shipped broken once already (the 13-of-15-alerts incident this whole
+    file exists to prevent), and the PII masking fix wave reproduced it in
+    miniature: pipeline_pii_vault_entries and pipeline_pii_tokenization_null_rate
+    were declared with no MetricSample(...) call anywhere in the codebase.
+
+    Every metric name must appear as a quoted literal in at least one producer
+    source file, i.e. somewhere a MetricSample(...) or equivalent could
+    actually construct it -- not just as the `name=` field in its own
+    MetricDef in registry.py.
+    """
+    sources = _producer_sources()
+    missing = [
+        m.name for m in PIPELINE_METRICS
+        if '"{}"'.format(m.name) not in sources and "'{}'".format(m.name) not in sources
+    ]
+    assert not missing, "Metrics with no push site: {}".format(missing)

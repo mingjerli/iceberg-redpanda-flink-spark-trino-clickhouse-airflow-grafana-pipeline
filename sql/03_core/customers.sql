@@ -8,15 +8,15 @@
 CREATE TABLE IF NOT EXISTS core.customers (
     customer_id                 STRING          COMMENT 'Unified customer ID (from entity_index)',
 
-    -- Best available identity
-    email                       STRING          COMMENT 'Primary email (best available)',
-    phone                       STRING          COMMENT 'Primary phone (best available)',
-    first_name                  STRING          COMMENT 'First name (best available)',
-    last_name                   STRING          COMMENT 'Last name (best available)',
-    full_name                   STRING          COMMENT 'Full name (best available)',
+    -- Best available identity (tokenized -- pii/registry.py)
+    email_token                 STRING          COMMENT 'Tokenized primary email (best available)',
+    phone_token                 STRING          COMMENT 'Tokenized primary phone (best available)',
+    first_name_token            STRING          COMMENT 'Tokenized first name (best available)',
+    last_name_token              STRING          COMMENT 'Tokenized last name (best available)',
+    full_name_token              STRING          COMMENT 'Tokenized full name (best available)',
 
-    -- Address (best available)
-    address_line1               STRING          COMMENT 'Street address',
+    -- Address (best available; only city/state/country/zip stay plaintext)
+    address_line1_token          STRING          COMMENT 'Tokenized street address',
     city                        STRING          COMMENT 'City',
     state                       STRING          COMMENT 'State/province',
     country                     STRING          COMMENT 'Country',

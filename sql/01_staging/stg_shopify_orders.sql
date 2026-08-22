@@ -10,8 +10,8 @@ CREATE TABLE IF NOT EXISTS staging.stg_shopify_orders (
     order_id                    BIGINT          COMMENT 'Unique order identifier',
     order_number                BIGINT          COMMENT 'Shop-unique order number',
     customer_id                 BIGINT          COMMENT 'Customer ID',
-    customer_email              STRING          COMMENT 'Normalized customer email',
-    customer_phone              STRING          COMMENT 'Customer phone number',
+    customer_email_token         STRING          COMMENT 'Tokenized customer email (pii/registry.py class: email)',
+    customer_phone_token         STRING          COMMENT 'Tokenized customer phone (pii/registry.py class: phone)',
     order_name                  STRING          COMMENT 'Order display name',
 
     -- Financial

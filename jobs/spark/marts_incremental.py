@@ -132,13 +132,13 @@ def build_customer_360(spark: SparkSession, mode: str = "incremental"):
     spark.sql("""
         CREATE TABLE IF NOT EXISTS iceberg.marts.customer_360 (
             customer_id STRING,
-            email STRING,
-            first_name STRING,
-            last_name STRING,
-            full_name STRING,
-            phone STRING,
-            address_line1 STRING,
-            address_line2 STRING,
+            email_token STRING,
+            first_name_token STRING,
+            last_name_token STRING,
+            full_name_token STRING,
+            phone_token STRING,
+            address_line1_token STRING,
+            address_line2_token STRING,
             city STRING,
             state STRING,
             zip STRING,
@@ -183,7 +183,7 @@ def build_customer_360(spark: SparkSession, mode: str = "incremental"):
             has_hubspot BOOLEAN,
             has_stripe BOOLEAN,
             has_mailchimp BOOLEAN,
-            mailchimp_subscriber_id STRING,
+            mailchimp_subscriber_id_token STRING,
             mailchimp_status STRING,
             email_open_rate DECIMAL(5, 4),
             email_click_rate DECIMAL(5, 4),
@@ -281,13 +281,13 @@ def build_customer_360(spark: SparkSession, mode: str = "incremental"):
         # Add core customer columns
         mart_df = mart_df.select(
             col("m.customer_id"),
-            col("c.email"),
-            col("c.first_name"),
-            col("c.last_name"),
-            col("c.full_name"),
-            col("c.phone"),
-            col("c.address_line1"),
-            col("c.address_line2"),
+            col("c.email_token"),
+            col("c.first_name_token"),
+            col("c.last_name_token"),
+            col("c.full_name_token"),
+            col("c.phone_token"),
+            col("c.address_line1_token"),
+            col("c.address_line2_token"),
             col("c.city"),
             col("c.state"),
             col("c.zip"),
@@ -339,13 +339,13 @@ def build_customer_360(spark: SparkSession, mode: str = "incremental"):
         # Build from metrics only
         mart_df = metrics_df.select(
             col("customer_id"),
-            col("email"),
-            lit(None).cast("string").alias("first_name"),
-            lit(None).cast("string").alias("last_name"),
-            col("full_name"),
-            lit(None).cast("string").alias("phone"),
-            lit(None).cast("string").alias("address_line1"),
-            lit(None).cast("string").alias("address_line2"),
+            col("email_token"),
+            lit(None).cast("string").alias("first_name_token"),
+            lit(None).cast("string").alias("last_name_token"),
+            col("full_name_token"),
+            lit(None).cast("string").alias("phone_token"),
+            lit(None).cast("string").alias("address_line1_token"),
+            lit(None).cast("string").alias("address_line2_token"),
             lit(None).cast("string").alias("city"),
             lit(None).cast("string").alias("state"),
             lit(None).cast("string").alias("zip"),
@@ -415,14 +415,14 @@ def build_customer_360(spark: SparkSession, mode: str = "incremental"):
         mc_events = spark.table("iceberg.staging.stg_mailchimp_events")
 
         # Get latest subscriber record per entity (cross-batch dedup)
-        mc_window = Window.partitionBy("subscriber_id").orderBy(col("_staged_at").desc())
+        mc_window = Window.partitionBy("subscriber_id_token").orderBy(col("_staged_at").desc())
         mc_latest = mc_subscribers \
             .withColumn("_rn", row_number().over(mc_window)) \
             .where(col("_rn") == 1) \
             .drop("_rn")
 
         # Aggregate events per subscriber email
-        mc_event_agg = mc_events.groupBy("email_normalized").agg(
+        mc_event_agg = mc_events.groupBy("email_normalized_token").agg(
             spark_sum(when(col("action") == "sent", 1).otherwise(0)).alias("total_emails_received"),
             spark_sum(when(col("action") == "open", 1).otherwise(0)).alias("total_emails_opened"),
             spark_sum(when(col("action") == "click", 1).otherwise(0)).alias("total_emails_clicked"),
@@ -435,11 +435,11 @@ def build_customer_360(spark: SparkSession, mode: str = "incremental"):
         # Join subscriber with event aggregates
         mc_agg = mc_latest.join(
             mc_event_agg,
-            mc_latest.email_normalized == mc_event_agg.email_normalized,
+            mc_latest.email_normalized_token == mc_event_agg.email_normalized_token,
             "left"
         ).select(
-            mc_latest.email_normalized.alias("mc_email"),
-            mc_latest.subscriber_id.alias("mailchimp_subscriber_id"),
+            mc_latest.email_normalized_token.alias("mc_email"),
+            mc_latest.subscriber_id_token.alias("mailchimp_subscriber_id_token"),
             mc_latest.status.alias("mailchimp_status"),
             mc_latest.avg_open_rate.alias("email_open_rate"),
             mc_latest.avg_click_rate.alias("email_click_rate"),
@@ -456,12 +456,12 @@ def build_customer_360(spark: SparkSession, mode: str = "incremental"):
         # Join to mart_df via email
         mart_df = mart_df.join(
             mc_agg,
-            mart_df.email == mc_agg.mc_email,
+            mart_df.email_token == mc_agg.mc_email,
             "left"
         ).drop("mc_email")
 
         mart_df = mart_df \
-            .withColumn("has_mailchimp", col("mailchimp_subscriber_id").isNotNull()) \
+            .withColumn("has_mailchimp", col("mailchimp_subscriber_id_token").isNotNull()) \
             .withColumn("days_since_last_email",
                         when(col("last_email_open_date").isNotNull(),
                              datediff(current_date(), col("last_email_open_date")))
@@ -470,7 +470,7 @@ def build_customer_360(spark: SparkSession, mode: str = "incremental"):
         logger.warning("Could not read Mailchimp data")
         mart_df = mart_df \
             .withColumn("has_mailchimp", lit(False)) \
-            .withColumn("mailchimp_subscriber_id", lit(None).cast("string")) \
+            .withColumn("mailchimp_subscriber_id_token", lit(None).cast("string")) \
             .withColumn("mailchimp_status", lit(None).cast("string")) \
             .withColumn("email_open_rate", lit(None).cast("decimal(5,4)")) \
             .withColumn("email_click_rate", lit(None).cast("decimal(5,4)")) \
@@ -487,11 +487,11 @@ def build_customer_360(spark: SparkSession, mode: str = "incremental"):
     # Join GA4 session data (web analytics)
     try:
         ga4_sessions = spark.table("iceberg.staging.stg_ga4_sessions").filter(
-            col("user_id").isNotNull() & (col("user_id") != "")
+            col("user_id_token").isNotNull() & (col("user_id_token") != "")
         )
 
-        # Aggregate GA4 metrics by user_id (email)
-        ga4_agg = ga4_sessions.groupBy(col("user_id").alias("ga4_email")).agg(
+        # Aggregate GA4 metrics by user_id_token (tokenized email)
+        ga4_agg = ga4_sessions.groupBy(col("user_id_token").alias("ga4_email")).agg(
             count("session_id").alias("ga4_total_sessions"),
             spark_sum("page_view_count").alias("ga4_total_page_views"),
             spark_max("session_start").cast("date").alias("ga4_last_session_date"),
@@ -502,7 +502,7 @@ def build_customer_360(spark: SparkSession, mode: str = "incremental"):
         # Join to mart_df via email
         mart_df = mart_df.join(
             ga4_agg,
-            mart_df.email == ga4_agg.ga4_email,
+            mart_df.email_token == ga4_agg.ga4_email,
             "left"
         ).drop("ga4_email")
 

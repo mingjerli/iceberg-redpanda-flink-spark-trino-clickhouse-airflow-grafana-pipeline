@@ -8,15 +8,16 @@
 
 CREATE TABLE IF NOT EXISTS staging.stg_hubspot_contacts (
     contact_id                  STRING          COMMENT 'HubSpot contact ID',
-    email                       STRING          COMMENT 'Normalized email (lowercase, trimmed)',
-    first_name                  STRING          COMMENT 'First name',
-    last_name                   STRING          COMMENT 'Last name',
-    full_name                   STRING          COMMENT 'Concatenated full name',
-    phone                       STRING          COMMENT 'Primary phone',
-    mobile_phone                STRING          COMMENT 'Mobile phone',
+    email_token                 STRING          COMMENT 'Tokenized email (pii/registry.py class: email)',
+    first_name_token            STRING          COMMENT 'Tokenized first name (class: name)',
+    last_name_token             STRING          COMMENT 'Tokenized last name (class: name)',
+    full_name_token             STRING          COMMENT 'Tokenized full name (class: name)',
+    phone_token                 STRING          COMMENT 'Tokenized primary phone (class: phone)',
+    mobile_phone_token          STRING          COMMENT 'Tokenized mobile phone (class: phone)',
+    last_name_prefix_token      STRING          COMMENT 'Tokenized 3-char last-name prefix, for name_zip blocking (class: name_prefix)',
 
     -- Address
-    address                     STRING          COMMENT 'Street address',
+    address_token                STRING          COMMENT 'Tokenized street address (class: address)',
     city                        STRING          COMMENT 'City',
     state                       STRING          COMMENT 'State/region',
     zip                         STRING          COMMENT 'Postal code',

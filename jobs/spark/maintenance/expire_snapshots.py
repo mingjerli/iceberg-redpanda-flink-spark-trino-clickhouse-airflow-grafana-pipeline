@@ -22,9 +22,22 @@ Usage:
     # Dry run
     spark-submit expire_snapshots.py --dry-run
 
+    # Purge every plaintext snapshot, e.g. to complete the PII tokenization
+    # migration (docs/RUNBOOK.md "Migrating Existing Data to Tokenized
+    # Columns"). Both --retain-last and --older-than must be passed
+    # explicitly: the defaults below exist to protect routine maintenance
+    # runs, and a migration purge is not one of those. --retain-last 1, not
+    # 0: Iceberg's expire_snapshots procedure requires retain_last >= 1 and
+    # always keeps the current snapshot regardless, and after the migration's
+    # rebuild that current snapshot is the tokenized one, so 1 is the floor
+    # that still purges every pre-migration snapshot.
+    spark-submit expire_snapshots.py --retention-days 0 --retain-last 1 \
+        --remove-orphans --older-than "2026-08-21 00:00:00"
+
 Configuration:
     - DEFAULT_RETENTION_DAYS: Default snapshot retention period (default: 7 days)
-    - RETAIN_LAST_N: Always keep at least this many snapshots (default: 3)
+    - RETAIN_LAST_N: Default floor on snapshots kept regardless of age (default: 3),
+      overridable per run with --retain-last
 """
 
 from __future__ import annotations
@@ -127,16 +140,26 @@ def expire_snapshots(
     table_name: str,
     retention_days: int,
     dry_run: bool = False,
+    retain_last: int = RETAIN_LAST_N,
 ) -> ExpirationStats:
-    """Expire old snapshots for a single table."""
+    """Expire old snapshots for a single table.
+
+    retain_last is a floor: this many of the most recent snapshots are kept
+    regardless of retention_days. It defaults to RETAIN_LAST_N so routine
+    maintenance runs are unaffected; pass 1 -- the minimum Iceberg's
+    expire_snapshots procedure accepts -- to lower that floor to just the
+    current snapshot, e.g. to purge pre-migration plaintext snapshots
+    (docs/RUNBOOK.md). `main()` clamps any lower value up to 1 before it
+    reaches this function.
+    """
     logger.info(f"Processing table: {table_name}")
 
     # Get stats before expiration
     snapshot_count_before, snapshots = get_snapshot_stats(spark, table_name)
     logger.info(f"  Snapshots before: {snapshot_count_before}")
 
-    if snapshot_count_before <= RETAIN_LAST_N:
-        logger.info(f"  Skipping: Only {snapshot_count_before} snapshots (minimum to retain: {RETAIN_LAST_N})")
+    if snapshot_count_before <= retain_last:
+        logger.info(f"  Skipping: Only {snapshot_count_before} snapshots (minimum to retain: {retain_last})")
         return ExpirationStats(
             table_name=table_name,
             snapshots_before=snapshot_count_before,
@@ -154,7 +177,7 @@ def expire_snapshots(
 
     # Count snapshots that would be expired
     snapshots_to_expire = [
-        s for s in snapshots[RETAIN_LAST_N:]  # Keep at least RETAIN_LAST_N
+        s for s in snapshots[retain_last:]  # Keep at least retain_last
         if s.committed_at and s.committed_at.timestamp() * 1000 < expiration_ts_ms
     ]
 
@@ -194,7 +217,7 @@ def expire_snapshots(
             CALL iceberg.system.expire_snapshots(
                 table => '{table_name}',
                 older_than => TIMESTAMP '{expiration_timestamp.strftime('%Y-%m-%d %H:%M:%S')}',
-                retain_last => {RETAIN_LAST_N}
+                retain_last => {retain_last}
             )
         """).collect()
 
@@ -240,9 +263,25 @@ def expire_snapshots(
         )
 
 
-def remove_orphan_files(spark: SparkSession, table_name: str, dry_run: bool = False) -> int:
-    """Remove orphan files that are no longer referenced by any snapshot."""
+def remove_orphan_files(
+    spark: SparkSession,
+    table_name: str,
+    dry_run: bool = False,
+    older_than: Optional[str] = None,
+) -> int:
+    """Remove orphan files that are no longer referenced by any snapshot.
+
+    older_than is an optional 'YYYY-MM-DD HH:MM:SS' timestamp literal. Iceberg's
+    remove_orphan_files procedure defaults older_than to three days ago when it
+    is omitted, which leaves same-day orphan files on disk -- exactly what a
+    same-day migration purge produces. Pass it explicitly to confirm those
+    files actually leave MinIO (docs/RUNBOOK.md).
+    """
     logger.info(f"  Checking for orphan files...")
+
+    older_than_arg = (
+        f",\n                older_than => TIMESTAMP '{older_than}'" if older_than else ""
+    )
 
     try:
         if dry_run:
@@ -250,7 +289,7 @@ def remove_orphan_files(spark: SparkSession, table_name: str, dry_run: bool = Fa
             result = spark.sql(f"""
                 CALL iceberg.system.remove_orphan_files(
                     table => '{table_name}',
-                    dry_run => true
+                    dry_run => true{older_than_arg}
                 )
             """).collect()
             orphan_count = len(result)
@@ -261,7 +300,7 @@ def remove_orphan_files(spark: SparkSession, table_name: str, dry_run: bool = Fa
             # Actually remove orphan files
             result = spark.sql(f"""
                 CALL iceberg.system.remove_orphan_files(
-                    table => '{table_name}'
+                    table => '{table_name}'{older_than_arg}
                 )
             """).collect()
             orphan_count = len(result)
@@ -334,11 +373,41 @@ def main():
         help="Also remove orphan files after expiration",
     )
     parser.add_argument(
+        "--retain-last",
+        type=int,
+        default=RETAIN_LAST_N,
+        help=(
+            f"Minimum snapshots kept regardless of age (default: {RETAIN_LAST_N}). "
+            "Pass 1 with --retention-days 0 to lower the floor to just the "
+            "current snapshot, e.g. for the PII tokenization migration purge. "
+            "Iceberg's expire_snapshots procedure requires at least 1 and "
+            "always keeps the current snapshot regardless; values below 1 "
+            "are clamped up to 1."
+        ),
+    )
+    parser.add_argument(
+        "--older-than",
+        type=str,
+        default=None,
+        help=(
+            "'YYYY-MM-DD HH:MM:SS' passed to remove_orphan_files. Iceberg "
+            "defaults to three days ago when this is omitted, which leaves "
+            "same-day orphan files on disk."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Show what would be expired without executing",
     )
     args = parser.parse_args()
+
+    if args.retain_last < 1:
+        logger.warning(
+            f"--retain-last {args.retain_last} is below Iceberg's minimum of 1 "
+            "(expire_snapshots always keeps the current snapshot); clamping to 1."
+        )
+        args.retain_last = 1
 
     logger.info(f"Starting Iceberg snapshot expiration (retention: {args.retention_days} days)")
     spark = create_spark_session()
@@ -358,12 +427,21 @@ def main():
 
         results = []
         for table in tables:
-            result = expire_snapshots(spark, table, args.retention_days, args.dry_run)
+            result = expire_snapshots(
+                spark, table, args.retention_days, args.dry_run,
+                retain_last=args.retain_last,
+            )
             results.append(result)
 
-            # Optionally remove orphan files
-            if args.remove_orphans and result.status == "success":
-                remove_orphan_files(spark, table, args.dry_run)
+            # Optionally remove orphan files. "skipped" (too few snapshots to
+            # expire any) is included alongside "success": a freshly recreated
+            # table -- e.g. staging right after the migration's DROP/rebuild --
+            # has fewer snapshots than the retain_last floor and always takes
+            # the early-return "skipped" branch in expire_snapshots(), so
+            # gating on "success" alone would mean its orphan files are never
+            # swept.
+            if args.remove_orphans and result.status in ("success", "skipped"):
+                remove_orphan_files(spark, table, args.dry_run, older_than=args.older_than)
 
         print_summary(results)
         succeeded = not any(r.status == "failed" for r in results)
