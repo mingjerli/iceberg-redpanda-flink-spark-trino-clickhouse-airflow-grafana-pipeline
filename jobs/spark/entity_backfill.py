@@ -442,7 +442,8 @@ def write_results(
     spark: SparkSession,
     entity_index_df: DataFrame,
     blocking_index_df: DataFrame,
-    dry_run: bool
+    dry_run: bool,
+    mode: str = "initial"
 ):
     """Write results to Iceberg tables."""
     if dry_run:
@@ -452,12 +453,25 @@ def write_results(
         blocking_index_df.show(20, truncate=False)
         return
 
-    logger.info("Writing entity_index...")
-    entity_index_df.writeTo("iceberg.semantic.entity_index").append()
+    # The write mode has to match the read scope. `initial` reads every staging
+    # customer with no watermark filter, so appending stacks a full
+    # recomputation on every run -- silently, because duplicate rows are not an
+    # error. `range` is filtered by --start-date/--end-date, so it must keep
+    # appending or each window would erase the last. See CLAUDE.md, and the
+    # regression this caused: entity_index reached 2,984 rows for 985 distinct
+    # unified_ids, cascading to 43,217 marts.customer_360 rows for 605 real
+    # customers.
+    replace = mode == "initial"
+    verb = "Replacing" if replace else "Appending to"
+
+    logger.info(f"{verb} entity_index...")
+    entity_writer = entity_index_df.writeTo("iceberg.semantic.entity_index")
+    entity_writer.createOrReplace() if replace else entity_writer.append()
     logger.info(f"Wrote {entity_index_df.count()} entity_index records")
 
-    logger.info("Writing blocking_index...")
-    blocking_index_df.writeTo("iceberg.semantic.blocking_index").append()
+    logger.info(f"{verb} blocking_index...")
+    blocking_writer = blocking_index_df.writeTo("iceberg.semantic.blocking_index")
+    blocking_writer.createOrReplace() if replace else blocking_writer.append()
     logger.info(f"Wrote {blocking_index_df.count()} blocking_index records")
 
 
@@ -663,7 +677,7 @@ def main():
         )
 
         # Write results
-        write_results(spark, entity_index_df, blocking_index_df, args.dry_run)
+        write_results(spark, entity_index_df, blocking_index_df, args.dry_run, args.mode)
 
         # Update stats
         if not args.dry_run:
